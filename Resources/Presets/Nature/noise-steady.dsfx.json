@@ -1,0 +1,27 @@
+{
+  "schema": "dreamsfx/2",
+  "id": "benchmark.noise_steady",
+  "seed": 7117,
+  "durationSeconds": 6,
+  "voiceTailSeconds": 0.08,
+  "resources": [],
+  "nodes": [
+    {"id":"part1", "type":"voice.retro_noise", "version":1, "parameters":{"gainDb":-14, "voiceLimit":1}},
+    {"id":"tone", "type":"filter.one_pole_lowpass", "version":1, "parameters":{"cutoffHz":3000}},
+    {"id":"dc", "type":"filter.dc_block_20hz", "version":1, "parameters":{}},
+    {"id":"level", "type":"mix.gain_db", "version":1, "parameters":{"gainDb":-48}}
+  ],
+  "connections": [
+    {"from":{"node":"part1", "port":"audio"}, "to":{"node":"tone", "port":"input"}, "order":0},
+    {"from":{"node":"tone", "port":"audio"}, "to":{"node":"dc", "port":"input"}, "order":0},
+    {"from":{"node":"dc", "port":"audio"}, "to":{"node":"level", "port":"input"}, "order":0}
+  ],
+  "timeline": [
+    {"atSeconds":0, "action":"noteOn", "target":{"node":"part1", "port":"noteOn"}, "noteId":"bed", "midi":120, "velocity":0.7},
+    {"atSeconds":0.5, "action":"linear", "targets":[{"node":"level", "port":"gainDb"}], "value":-9},
+    {"atSeconds":5.5, "action":"linear", "targets":[{"node":"level", "port":"gainDb"}], "value":-9},
+    {"atSeconds":6, "action":"linear", "targets":[{"node":"level", "port":"gainDb"}], "value":-48},
+    {"atSeconds":6, "action":"noteOff", "target":{"node":"part1", "port":"noteOff"}, "noteId":"bed"}
+  ],
+  "output": {"node":"level", "port":"audio"}
+}

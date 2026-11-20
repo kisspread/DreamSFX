@@ -1,0 +1,81 @@
+sound small_magic.timestop
+preview 10 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  roomIR=impulse.room(3.2s)
+  white=buffer.white(3s)
+  pink=buffer.pink(3s)
+  brown=buffer.brown(3s)
+  emberWhite=buffer.white(.04s,channels=1)
+  skip extraRoomAndHiss=182400
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  room=room(ir=roomIR) -> gain(level=.8) -> mix
+  hills=echo(seconds=.71) -> ridge=lowpass(cutoffHz=1250,q=.5) -> gain(level=.85) -> mix
+  ridge -> gain(level=.34) -> delay(seconds=128/48000) -> hills
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+
+input rewind range 0 8 default 4
+audition { at .4 stopped; at 3.2 reversing; at 6.4 released; at 6.9 idle }
+memory { clockIn=0; inhaleIn=0; high=1; reverse=0; from=3200; to=140; duration=.28; push=.5; attack=.02; thick=.42 }
+state idle {}
+state stopped { enter stop; tick watch }
+state reversing { enter reverseTime; tick watch }
+state released { enter release; tick watch }
+rule stop {
+  reverse=0; clockIn=1
+  from=3200; to=140; duration=.28; push=.5; attack=.02; play breath
+  play longHit at now+.05; play shortHit at now+.05
+  world.ears:cutoffHz=target(380,.05); world.hush:level=target(.3,.05)
+}
+rule reverseTime { reverse=rewind; inhaleIn=0 }
+rule release {
+  from=160; to=3600; duration=.32; push=.45; attack=.32*.93
+  play breath; play inward; play finalHit at now+.31
+  world.ears:cutoffHz=target(20000,.12) at now+.22; world.hush:level=target(1,.1) at now+.22
+}
+rule watch {
+  clockIn=clockIn-dt
+  if clockIn<=0 then tickSound
+  if reverse>0 then reverseBreath
+}
+rule tickSound {
+  thick=if(reverse>0,.3,.42)
+  play clock; play tickWood
+  high=1-high
+  clockIn=if(reverse>0,max(.085,.34/max(.01,reverse)),1)
+}
+rule reverseBreath {
+  inhaleIn=inhaleIn-dt
+  if inhaleIn<=0 then inhale
+}
+rule inhale {
+  duration=max(.36,.95/(.6+.4*reverse)); from=rand(240,540); to=rand(900,2300)
+  push=.34; attack=.93*duration
+  play breath; play inward; inhaleIn=duration*.84
+}
+patch weight {
+  noise(buffer=brown,offset=rand(0,2.5),life=hitDuration+.05) -> lowpass(cutoffHz=exp(0,260,hitDuration*.6,55),q=.8) -> gain(level=exp(0,.0001,.006,weightLevel,hitDuration,.0001)) -> shape(drive=3) -> outlet
+}
+voice longHit -> world.pre { use weight(weightLevel=1.5,hitDuration=1.7) }
+voice shortHit -> world.pre { use weight(weightLevel=1.1,hitDuration=.5) }
+voice finalHit -> world.pre { use weight(weightLevel=1,hitDuration=.8) }
+voice tickWood[6] -> world.pre { use weight(weightLevel=thick*.9,hitDuration=.3) }
+voice clock[6] {
+  noise(buffer=white,offset=rand(0,2.5),life=.35) -> bandpass(cutoffHz=if(high,540,420),q=5) -> lowpass(cutoffHz=1500,q=.6) -> gain(level=exp(0,.0001,.004,thick,.09,thick*.12,.3,.0001)) -> world.pre
+}
+voice breath[4] {
+  noise(buffer=white,offset=rand(0,2.5),life=duration+.05) -> bandpass(cutoffHz=exp(0,from,duration,to),q=1.1) -> gain(level=exp(0,.0001,attack,push,duration,.0001)) -> world.pre
+}
+voice inward[4] {
+  noise(buffer=brown,offset=rand(0,2.5),life=duration+.05) -> lowpass(cutoffHz=140,q=.7) -> gain(level=exp(0,.0001,duration*.95,push*2.6,duration,.0001)) -> shape(drive=2) -> world.pre
+}
+output world.out

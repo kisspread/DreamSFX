@@ -1,0 +1,47 @@
+sound architecture.stone_gate
+preview 7.2 s
+seed 94817
+input friction range .25 1 default 1
+resources {
+  vault=impulse.room(2s,seed=81811)
+  rock=buffer.brown(1.4791666666666667s,seed=19103)
+  grit=buffer.pink(1.1666666666666667s,seed=92609)
+  dust=buffer.white(.075s,seed=34111)
+}
+memory { index=0; hue=1; contactTime=0 }
+start { hue=.55+.45*friction; play mass at .11; play modes at .16; play ridges at .28; play slab at .30; play edge at .32; repeat 14 then strike }
+# 原作写定的门框接触节奏。所有接触共用一套发声与发送，摩擦量控制表面音色。
+rule strike {
+  contactTime=pick(index,.38,.48,.86,1.42,1.99,2.13,2.61,3.32,3.46,4.1,4.79,5.27,5.35,5.5)
+  play chip at contactTime
+  index=index+1
+}
+bus doorway {
+  door=gain(level=.82); room=room(ir=vault) -> gain(level=.36) -> door
+  weight=gain() -> door; weight -> gain(level=.35) -> room
+  scrape=gain() -> door; scrape -> gain(level=.29) -> room
+  pressure=control.value(value=line(0,0,.1,0,.29,.1,.43,.7,.68,.19,1.12,.57,1.85,.82,2.02,.32,2.17,.89,3.12,1,3.39,.42,3.62,.94,4.49,.72,4.97,.34,5.19,.11,5.31,.58,5.58,.05,5.84,0))
+  pressure -> mass.env:level; pressure -> modes.env:level
+  pressure -> slab.env:level; pressure -> edge.env:level
+}
+voice mass {
+  noise(buffer=rock,offset=.16,playbackRate=.82,life=5.79) -> lowpass(cutoffHz=145,q=1.2) -> gain(level=.4) -> env=gain(level=0) -> doorway.weight
+}
+voice modes {
+  sine(hz=line(0,43,1.14,39,4.64,40.56,5.36,33.93),life=5.69) -> gain(level=.115) -> env=gain(level=0) -> doorway.weight
+  sine(hz=line(0,82,1.14,69,4.64,71.76,5.36,60.03),life=5.69) -> gain(level=.11) -> env
+  sine(hz=line(0,133,1.14,104,4.64,108.16,5.36,90.48),life=5.69) -> gain(level=.056) -> env
+}
+voice ridges { mod.sine(frequencyHz=line(0,6,1.52,13.1,2.82,16.3,5.02,5.5),amplitude=.42,offset=0,life=5.32) -> slab.chatter:level }
+voice slab {
+  noise(buffer=grit,offset=.08,life=5.55) -> bandpass(cutoffHz=line(0,430*hue,.45,680*hue,1.6,890*hue,1.74,425*hue,2.2,920*hue,3.1,540*hue,4.1,800*hue,5,370*hue,5.3,290*hue),q=.8) -> chatter=gain(level=.75) -> gain(level=.45*friction) -> env=gain(level=0) -> doorway.scrape
+}
+voice edge { noise(buffer=dust,offset=0,playbackRate=.85,life=5.33) -> bandpass(cutoffHz=1950,q=1.25) -> gain(level=.1) -> env=gain(level=0) -> doorway.scrape }
+voice chip[4] {
+  let speed=pick(index,.47,.7,.77,.83,.55,.9,.7,.52,1.08,.72,.6,.39,.49,.8)
+  let cut=hue*pick(index,285,800,1200,733,465,1150,820,390,1300,950,680,155,440,1100)
+  let impact=friction*pick(index,.65,.23,.15,.19,.43,.21,.16,.42,.17,.18,.13,.92,.53,.13)
+  let side=pick(index,-.36,-.22,-.05,-.15,-.1,.1,.21,.08,.2,.26,.29,.23,.33,.37)+(1-friction)*rand(-.14,.14)
+  source.grain_once(buffer=dust,decaySeconds=.025,playbackRate=speed,life=.075/speed) -> bandpass(cutoffHz=cut,q=1.05) -> gain(level=impact) -> pan(position=side) -> doorway.scrape
+}
+output doorway.door

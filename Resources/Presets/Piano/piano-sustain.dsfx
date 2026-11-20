@@ -1,0 +1,11 @@
+sound benchmark.piano_sustain
+preview .7 s
+tail 4 s
+input damperPedal range 0 1 default 1
+patch strings { keys=voice.modal_piano(gainDb=-12,voiceLimit=16) }
+track right uses strings {
+  tempo 150; velocity .6
+  pedal [.1-.7] when damperPedal
+  C4/16
+}
+output right.keys

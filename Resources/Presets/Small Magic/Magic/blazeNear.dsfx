@@ -1,0 +1,45 @@
+sound small_magic.blazenear
+preview 9 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  roomIR=impulse.room(3.2s)
+  white=buffer.white(3s)
+  pink=buffer.pink(3s)
+  brown=buffer.brown(3s)
+  emberWhite=buffer.white(.04s,channels=1)
+  skip extraRoomAndHiss=182400
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  room=room(ir=roomIR) -> gain(level=.8) -> mix
+  hills=echo(seconds=.71) -> ridge=lowpass(cutoffHz=1250,q=.5) -> gain(level=.85) -> mix
+  ridge -> gain(level=.34) -> delay(seconds=128/48000) -> hills
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+
+input intensity range 0 1 default 1
+audition { at .3 burning; at 7 idle }
+memory { amount=0 }
+state idle {}
+state burning { enter ignite; tick sputter }
+rule ignite { amount=intensity*min(1,(85/110)^.6+.2*min(1,600/700)); play fire }
+rule sputter {
+  if amount>.05 then sparks
+}
+rule sparks { if rand(0,1)<dt*14*amount then ember }
+rule ember { play cinder }
+voice fire {
+  noise(buffer=pink,offset=rand(0,2.5)) -> bandpass(cutoffHz=280,q=.6) -> gain(level=target(0,.22*amount,.5)) -> body=gain(level=target(0,if(amount>.004,1,0),.3)) -> pan=pan(position=0) -> world.mix
+  noise(buffer=brown,offset=rand(0,2.5)) -> lowpass(cutoffHz=140) -> gain(level=target(0,.6*amount,.5)) -> body
+  pan -> gain(level=.25) -> world.room
+}
+voice cinder[9] {
+  source.grain_once(buffer=emberWhite,decaySeconds=.006,playbackRate=rand(.35,1.15),life=.115) -> bandpass(cutoffHz=rand(800,3000),q=1.5) -> gain(level=rand(.15,.6)*amount) -> pan(position=rand(-.8,.8)) -> world.mix
+}
+output world.out

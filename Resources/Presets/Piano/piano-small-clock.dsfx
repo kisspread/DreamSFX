@@ -1,0 +1,10 @@
+sound benchmark.piano_small_clock
+preview 7.5 s
+tail 4 s
+input touch range 0 1 default .6
+patch strings { keys=voice.modal_piano(gainDb=-12,voiceLimit=16) }
+track clock uses strings {
+  tempo 96; repeat 2; gate .8; velocity touch
+  C4/8 E4/8 G4/4 R/8 E4/8 | C4/4 [C4 E4 G4]/2
+}
+output clock.keys

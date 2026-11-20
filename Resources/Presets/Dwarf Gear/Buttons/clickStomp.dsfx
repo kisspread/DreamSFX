@@ -1,0 +1,2 @@
+instance dwarf.clickstomp of dwarf.clickthud
+kind = 3

@@ -1,0 +1,2 @@
+instance dwarf.gearroll of dwarf.gearmesh
+kind = 1

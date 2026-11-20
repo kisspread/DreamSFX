@@ -1,0 +1,51 @@
+sound small_magic.growthpour
+preview 10 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  roomIR=impulse.room(3.2s)
+  white=buffer.white(3s)
+  pink=buffer.pink(3s)
+  brown=buffer.brown(3s)
+  emberWhite=buffer.white(.04s,channels=1)
+  skip extraRoomAndHiss=182400
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  room=room(ir=roomIR) -> gain(level=.8) -> mix
+  hills=echo(seconds=.71) -> ridge=lowpass(cutoffHz=1250,q=.5) -> gain(level=.85) -> mix
+  ridge -> gain(level=.34) -> delay(seconds=128/48000) -> hills
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+
+input density range .1 2 default 1
+input distance range 0 100 default 21.93171219946131
+input side range -1 1 default .069375729
+audition { at .3 pour }
+memory { spread=0; level=1; since=0 }
+state idle {}
+state pour { enter begin; tick feed }
+rule begin { level=.4+.6*max(0,1-distance/110); play growth; play onset }
+rule feed {
+  since=time-.3
+  spread=clamp(since*1.5,0,6)
+  growth.soil:level=target((.3+.4*min(1,spread/5.8))*density,.4)
+  growth.branch:level=target(.7*level,.3)
+  growth.pan:position=target(.8*side,.1)
+}
+voice growth {
+  noise(buffer=brown,offset=rand(0,2.5)) -> lowpass(cutoffHz=95) -> soil=gain(level=0) -> branch=gain(level=0) -> pan=pan(position=0) -> world.mix
+  noise(buffer=pink,offset=rand(0,2.5)) -> leaves=bandpass(cutoffHz=1200,q=.8) -> gain(level=target(0,.16,.4)) -> branch
+  sine(hz=.7) -> gain(level=450) -> leaves:cutoffHz
+  pan -> gain(level=.3) -> world.room
+}
+voice onset {
+  noise(buffer=pink,offset=rand(0,2.5),life=.75) -> bandpass(cutoffHz=900,q=.8) -> gain(level=swell(.7,.35*level,.6)) -> stereo=pan(position=side) -> world.mix
+  stereo -> gain(level=.3) -> world.room
+}
+output world.out

@@ -1,0 +1,16 @@
+sound benchmark.retro_crickets
+preview 2.945 s
+tail .08 s
+seed 3625
+input noiseMix range 0 1 default 0
+patch narrow { osc=voice.retro_pulse(gainDb=-34,voiceLimit=1,dutyCycle=.1) }
+patch hiss { osc=voice.retro_noise(gainDb=-34,voiceLimit=1) }
+bus field { pulseIn=gain(level=1-noiseMix) -> dc=filter.dc_block_20hz(); noiseIn=gain(level=noiseMix) -> dc }
+phrase chirps { B7/4 B7/4 B7/4 B7/4 }
+track pulse uses narrow -> field.pulseIn {
+  beatSeconds .17; holdSeconds .0315; repeat 3; periodSeconds 1.2; velocity .45; play chirps
+}
+track noise uses hiss -> field.noiseIn {
+  beatSeconds .17; holdSeconds .0315; repeat 3; periodSeconds 1.2; velocity .45; play chirps
+}
+output field.dc

@@ -1,0 +1,11 @@
+sound benchmark.noise_wind_gust
+preview 3 s
+tail .08 s
+seed 2752
+input strength range .2 1.5 default 1
+patch wind { air=voice.retro_noise(gainDb=-8,voiceLimit=1) }
+bus gust {
+  tone=filter.one_pole_lowpass(cutoffHz=line(0,250,.9,250+1550*strength,1.6,250+700*strength,3,300)) -> filter.dc_block_20hz() -> out=mix.gain_db(gainDb=line(0,-48,.5,-14,1,12*(strength-1),1.8,-9,3,-48))
+}
+track part1 uses wind -> gust.tone { tempo 80; velocity .7; C9/1 }
+output gust.out

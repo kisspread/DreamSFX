@@ -1,0 +1,10 @@
+sound benchmark.musicbox_single
+preview .1053125 s
+tail 4 s
+input touch range 0 1 default .6
+patch comb { tine=voice.music_box(gainDb=-16,voiceLimit=16) }
+track pluck uses comb {
+  at .0053125; tempo 150; velocity touch
+  C5/16
+}
+output pluck.tine

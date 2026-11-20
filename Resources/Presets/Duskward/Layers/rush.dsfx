@@ -1,0 +1,2 @@
+instance duskward.rush of duskward.tour
+solo = 5

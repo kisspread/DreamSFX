@@ -1,0 +1,21 @@
+sound small_magic.ambience
+preview 22 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  skip roomAndWhite=595228
+  pink=buffer.pink(3s)
+  skip brownAndGrainAndBoard=472320
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+
+# 草甸的合成底层随同一监听者持续发声。
+output world.out

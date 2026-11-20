@@ -1,0 +1,11 @@
+sound benchmark.noise_steady
+preview 6 s
+tail .08 s
+seed 7117
+input cutoffHz range 200 10000 default 3000
+patch noise { air=voice.retro_noise(gainDb=-14,voiceLimit=1) }
+bus bed {
+  tone=filter.one_pole_lowpass(cutoffHz=cutoffHz) -> filter.dc_block_20hz() -> out=mix.gain_db(gainDb=line(0,-48,.5,-9,5.5,-9,6,-48))
+}
+track part1 uses noise -> bed.tone { tempo 40; velocity .7; C9/1 }
+output bed.out

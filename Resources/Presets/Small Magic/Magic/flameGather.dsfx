@@ -1,0 +1,42 @@
+sound small_magic.flamegather
+preview 6.5 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  roomIR=impulse.room(3.2s)
+  white=buffer.white(3s)
+  pink=buffer.pink(3s)
+  brown=buffer.brown(3s)
+  emberWhite=buffer.white(.04s,channels=1)
+  skip extraRoomAndHiss=182400
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  room=room(ir=roomIR) -> gain(level=.8) -> mix
+  hills=echo(seconds=.71) -> ridge=lowpass(cutoffHz=1250,q=.5) -> gain(level=.85) -> mix
+  ridge -> gain(level=.34) -> delay(seconds=128/48000) -> hills
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+
+input power range 0 1 default 1
+audition { at .3 cast }
+memory { charge=0 }
+state idle {}
+state cast { enter init; tick heat }
+rule init { play flame }
+rule heat { charge=clamp((time-.3)/3.2,0,power)
+  flame.roar:level=target(.12+.5*charge,.08)
+  flame.coals:level=target(.2+.8*charge,.08)
+  flame.air:level=target(.3+.5*charge,.08)
+}
+voice flame {
+  noise(buffer=pink,offset=rand(0,2.5)) -> bandpass(cutoffHz=320,q=.6) -> roar=gain(level=0) -> air=gain(level=0) -> spread=pan(position=0) -> world.mix
+  noise(buffer=brown,offset=rand(0,2.5)) -> lowpass(cutoffHz=130) -> coals=gain(level=0) -> air
+  spread -> gain(level=.15) -> world.room
+}
+output world.out

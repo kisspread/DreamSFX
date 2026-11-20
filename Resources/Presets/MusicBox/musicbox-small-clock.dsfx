@@ -1,0 +1,10 @@
+sound benchmark.musicbox_small_clock
+preview 7.5 s
+tail 4 s
+input transposeBy range -12 12 default 0
+patch comb { tine=voice.music_box(gainDb=-16,voiceLimit=16) }
+track clock uses comb {
+  tempo 96; repeat 2; gate .8; velocity .6; transpose transposeBy
+  C4/8 E4/8 G4/4 R/8 E4/8 | C4/4 [C4 E4 G4]/2
+}
+output clock.tine

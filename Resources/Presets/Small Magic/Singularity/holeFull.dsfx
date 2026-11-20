@@ -1,0 +1,207 @@
+sound small_magic.holefull
+# 黑洞：抓力越大，撕裂越响。闭合越深，低音越沉，心跳越快。
+clock 100 Hz
+preview 18 s
+seed 132721
+input grip range 0 1.3 default 0.25
+input closing range 0 1 default 0
+input held range 0 1000 default 0
+
+audition {
+  grip = clamp(.25+(min(time,6.39)-.3)*.28,0,1.2)
+  closing = clamp(time-6.4,0,1)
+  held = max(0,(min(time,6.39)-1.2)*40)
+  at 0.3 open
+  at 6.4 shut
+  at 7.6 burst
+  at 16 idle
+}
+
+resources {
+  air = impulse.room(3.2s)
+  white = buffer.white(3s)
+  pink = buffer.pink(3s)
+  brown = buffer.brown(3s)
+  # 共用随机流。跳过本场景未播放的三个程序缓冲所消耗的抽样。
+  skip unusedEmberBuffer = 1920
+  skip boardRoomStereo = 86400
+  skip boardNoise = 96000
+}
+
+memory {
+  dx=10; dz=-22; distance=sqrt(dx^2+dz^2)
+  side=(16*dx+6*dz)/(sqrt(292)*distance); nearLevel=.45+.55*(1-distance/110)
+  age=0; turn=0; sunk=1; pitchDrop=0; nextBeat=0; nextBreath=0; breathPan=0; heldAtBurst=0; arrival=0; gustDue=0
+}
+start { play world }
+state idle  { enter release }
+state open  { enter openWell; tick feed }
+state shut  { tick feed }
+state burst { enter erupt; tick shockCheck }
+
+rule openWell {
+  age=0
+  turn=0
+  nextBeat=now+1
+  nextBreath=now+1.6
+  play well
+  all descent
+  all howl
+  all wail
+  play intake
+  play tear
+  play arrivalThud at now+.3
+}
+rule feed {
+  # 每个控制帧按现场输入更新。心跳的下一拍由抓力与闭合度决定。
+  age=age+dt
+  turn=turn+dt/6*(1+17*closing^2)
+  sunk=(1-.22*min(1,age/8))*(1-.5*closing)
+  pitchDrop=-500*closing^2
+  heldAtBurst=held
+  if closing==0 && now>=nextBreath then breath
+  if nextBeat<=now+.03 then beat
+  world.ears:cutoffHz=target(20000*(1400/20000)^min(1,grip*.8+closing),.15)
+  world.beds:level=target(max(0,1-.7*grip-closing),.15)
+  world.pre:level=target(.5+.1*grip+.4*closing^3,.03)
+}
+rule beat { play heart at max(nextBeat,now); nextBeat=nextBeat+max(.2,1.25-.4*min(1,grip)-.75*closing) }
+rule breath {
+  # 原声此处只播放可选录音，纯合成模式也推进这两次抽样。
+  breathPan=rand(-.6,.6)
+  nextBreath=now+rand(2,3.2)
+}
+rule release {
+  well.bus:level=target(0,.004)
+  stop well after .08
+  stop descent after .08
+  stop howl after .08
+  stop wail after .08
+  stop intake after .08
+  well.howlGain:level=set(0) at now+.08
+  well.wailGain:level=set(0) at now+.08
+}
+rule burst {
+  world.hush:level=line(0,1,.006,0,arrival-now-.004,0,arrival-now,1)
+  world.ears:cutoffHz=exp(0,1400,.6,1400,4,20000) at arrival
+  world.beds:level=line(0,0,2,.15,7,1) at arrival
+  world.pre:level=line(0,.5,.004,1.1,2,1.1,6,.5) at arrival
+  play ejection at arrival
+  play burstThud at arrival
+  play crack at arrival
+  all ring at arrival
+  play afterWind at arrival
+  all afterTone at arrival
+  repeat min(9,if(heldAtBurst>3,2+heldAtBurst/12,0)) then throw
+}
+rule throw { play shard at arrival+.02+.5*rand(0,1) }
+rule shock { play gust; gustDue=0 }
+rule erupt { call release; arrival=now+.16+min(distance/343,.2); gustDue=time+distance/340; call burst }
+rule shockCheck { if gustDue>0 && time>=gustDue then shock }
+
+patch thud {
+  noise(buffer=brown,offset=rand(0,2.5),life=length+.05) -> lowpass(cutoffHz=exp(0,260,length*.6,55),q=.8) -> gain(level=exp(0,.0001,.006,weight,length,.0001)) -> shape(drive=3) -> outlet
+}
+
+# 共用空间与背景风。房间和山谷只各算一次。
+voice world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=follow(.9,.72,.03))
+  beds=gain() -> mix
+  room=room(ir=air) -> gain(level=.8) -> mix
+  hills=echo(seconds=.71) -> distant=lowpass(cutoffHz=1250,q=.5) -> gain(level=.85) -> mix
+  distant -> gain(level=.34) -> delay(seconds=128/48000) -> hills
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+# 吸积层绕过世界低通。音量控制放在饱和之后。
+voice well {
+  bus=gain(level=line(0,0,.6,1)) -> rough=gain() -> gain(level=.75) -> shape(drive=3) -> gain(level=follow(.15,(.06+.2*grip^3)*(1+1.1*closing),.08)) -> shelf(cutoffHz=110,gainDb=7) -> clear=gain(level=nearLevel) -> pan(position=side*.4) -> world.pre
+  clear -> gain(level=.4) -> world.room
+  growl=sine(hz=follow(39,39+22*closing,.08)) -> gain(level=follow(0,.45*grip+.3*closing,.08)) -> rough:level
+  sine(hz=.23) -> gain(level=7) -> growl:hz
+  drone=gain(level=follow(0,.45*grip*(1+closing),.08)) -> bus
+  low=lowpass(cutoffHz=140,q=1.2) -> drone
+  sag=sine(hz=.17) -> sagDepth=gain(level=38)
+  a=sine(hz=31,cents=follow(0,pitchDrop,.03)) -> drone
+  b=sine(hz=31.6,cents=follow(0,pitchDrop,.03)) -> drone
+  c=saw(hz=62.3,cents=follow(0,pitchDrop,.03)) -> gain(level=.4) -> low
+  d=saw(hz=93.4,cents=follow(0,pitchDrop,.03)) -> gain(level=.25) -> low
+  e=saw(hz=43.8,cents=follow(0,pitchDrop,.03)) -> gain(level=.3) -> low
+  sagDepth -> a:cents
+  sagDepth -> b:cents
+  sagDepth -> c:cents
+  sagDepth -> d:cents
+  sagDepth -> e:cents
+  fall=lowpass(cutoffHz=700,q=1) -> gain(level=follow(0,.5*grip,.08)) -> bus
+  noise(buffer=pink,offset=rand(0,2.5)) -> howlIn=gain(level=6)
+  howlGain=gain(level=follow(0,.9*grip*(1+closing),.08)) -> bus
+  howlGain -> gain(level=1.5) -> world.room
+  wailGain=gain(level=follow(0,1.1*grip^2*(1+closing),.08)) -> shape(drive=2.5) -> wailOut=gain(level=.5) -> bus
+  wailOut -> gain(level=2) -> world.room
+}
+# 六个相隔八度的声部轮流淡入淡出，形成持续下坠的听感。
+voice descent[6] {
+  saw(hz=follow(27.5,27.5*2^wrap(i-turn,6),.02)) -> gain(level=follow(0,.3*sin(pi*wrap(i-turn,6)/6)^2,.02)) -> well.fall
+}
+voice howl(f=[110,155.6,233.1]) {
+  well.howlIn -> band=bandpass(cutoffHz=follow(f,f*sunk,.1),q=16) -> well.howlGain
+  sine(hz=.11+.07*i) -> gain(level=f*.06) -> band:cutoffHz
+}
+voice wail(f=[466.2,659.3,932.3]) {
+  well.howlIn -> band=bandpass(cutoffHz=follow(f,f*sunk,.1),q=22) -> well.wailGain
+  sine(hz=.19+.11*i) -> gain(level=f*.035) -> band:cutoffHz
+}
+voice intake {
+  noise(buffer=pink,offset=rand(0,2.5)) -> band=bandpass(cutoffHz=700,q=2.4) -> gain(level=follow(0,.3*grip*(1+2*closing),.08)) -> orbit=pan() -> well.bus
+  saw(hz=follow(.6,.5+1.3*grip+9*closing^2,.08)) -> gain(level=-480) -> band:cutoffHz
+  sine(hz=follow(.3,.25+.65*grip+4.5*closing^2,.08)) -> gain(level=.8) -> orbit:position
+  noise(buffer=white,offset=rand(0,2.5)) -> highpass(cutoffHz=follow(2500,2500+6000*closing,.03)) -> gain(level=follow(0,.04*grip+.45*closing^2,.03)) -> well.bus
+}
+voice tear {
+  first=gain(level=nearLevel*.6) -> shelf(cutoffHz=120,gainDb=8) -> pan(position=side*.4) -> world.pre
+  first -> gain(level=.4) -> world.room
+  noise(buffer=white,offset=rand(0,2.5),life=.6) -> bandpass(cutoffHz=exp(0,5000,.5,140),q=1.5) -> gain(level=exp(0,.0001,.04,.5,.55,.0001)) -> first
+}
+voice arrivalThud -> tear.first { use thud(length=1.1,weight=1.4) }
+voice heart[4] -> well.bus { use thud(length=.45,weight=.5*grip) }
+# 爆发时归还低频重量，再由环、余啸和碎片填满尾段。
+voice ejection {
+  clear=gain(level=nearLevel) -> pan(position=side*.3) -> world.pre
+  clear -> gain(level=.4) -> world.room
+  clear -> gain(level=.5) -> world.hills
+  body=gain() -> gain(level=.8) -> shudder=gain() -> shape(drive=3) -> gain(level=.5) -> shelf(cutoffHz=120,gainDb=10) -> clear
+  sine(hz=exp(0,23,2.8,9),life=3) -> gain(level=exp(0,.65,2.8,.0001)) -> shudder:level
+  noise(buffer=pink,offset=rand(0,2.5),life=3.3) -> lowpass(cutoffHz=exp(0,3200,2.2,80),q=.6) -> gain(level=exp(0,1.3,3.2,.0001)) -> body
+  sine(hz=30,life=5.1) -> pan(position=-.7) -> floor=gain(level=exp(0,.0001,.015,1.2,5,.0001)) -> shape(drive=2.4) -> clear
+  sine(hz=32.6,life=5.1) -> pan(position=.7) -> floor
+}
+voice burstThud -> ejection.body { use thud(length=1.6,weight=1.5) }
+voice crack {
+  noise(buffer=pink,offset=rand(0,2.5),life=.18) -> lowpass(cutoffHz=2400) -> gain(level=exp(0,1,.16,.0001)) -> ejection.clear
+}
+voice ring(panSide=[-0.85,0.85]) {
+  noise(buffer=white,offset=rand(0,2.5),life=1.2) -> band=bandpass(cutoffHz=exp(0,300,1,5200+400*panSide),q=1.6) -> env=gain(level=exp(0,.0001,.03,.8,1.15,.0001)) -> shape(drive=3) -> gain(level=.5) -> pan(position=panSide) -> ejection.clear
+  band -> delay(seconds=line(0,.005,1,.001)) -> env
+}
+voice afterWind {
+  noise(buffer=pink,offset=rand(0,2.5),life=7.1) -> wind=gain(level=7)
+  env=gain(level=exp(0,.0001,.05,1,3,.8,6.8,.0001)) -> shape(drive=4) -> out=gain(level=.75) -> ejection.clear
+  out -> gain(level=1.8) -> world.room
+}
+voice afterTone(f=[311.1,440,622.3,880]) {
+  afterWind.wind -> band=bandpass(cutoffHz=exp(0,f*1.3,.25,f,6.8,f*.35),q=22) -> afterWind.env
+  sine(hz=rand(.3,.8),life=7.1) -> gain(level=f*.03) -> band:cutoffHz
+}
+voice shard[9] {
+  let lowHz=rand(700,1200)
+  let highHz=rand(3200,4700)
+  noise(buffer=white,offset=rand(0,2.5),life=.26) -> bandpass(cutoffHz=exp(0,lowHz,.1,highHz,.24,1000),q=3) -> gain(level=swell(.24,.3,.7)) -> pan(position=rand(-.9,.9)) -> ejection.clear
+}
+voice gust {
+  noise(buffer=pink,offset=rand(0,2.5),life=1.7) -> bandpass(cutoffHz=exp(0,260,.25,1500,1.1,380),q=.8) -> gain(level=exp(0,.0001,.18,.5251,1.6,.0001)) -> pan(position=line(0,side*.8,1.2,-side*.6)) -> wind=gain() -> world.mix
+  wind -> gain(level=.25) -> world.room
+  noise(buffer=brown,offset=rand(0,2.5),life=1.2) -> lowpass(cutoffHz=140) -> gain(level=exp(0,.0001,.08,.9801,1.1,.0001)) -> world.mix
+}
+output world.out

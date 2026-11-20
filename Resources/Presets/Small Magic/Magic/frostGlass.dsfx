@@ -1,0 +1,59 @@
+sound small_magic.frostglass
+preview 3.2 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  # 主场先生成房间、三色噪声和颗粒。两套总线共用这条随机序列。
+  skip roomAndWhite=595228
+  pink=buffer.pink(3s)
+  skip brownAndGrain=289920
+  reflections=buffer.white(.9s)
+  hiss=buffer.white(2s,channels=1)
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+bus synth {
+  sum=gain()
+  input=gain(level=target(.8,.8*volume,.03)) -> compressor(thresholdDb=-10,kneeDb=4,ratio=4,attackSeconds=.003,releaseSeconds=.2) -> shape(drive=1.3,normalized=1) -> sum
+  room=room.decaying_noise(noise=reflections,attackSeconds=.004,decaySeconds=.14285714285714285) -> gain(level=.35) -> input
+  world.out -> sum
+}
+
+audition { at .3 cast }
+state idle {}
+state cast { enter launch }
+memory { partial=0; pitch=1976; onset=0; fall=.25; loudness=.06; side=0 }
+rule launch { repeat 7 then strike; play weight; repeat 14 then scatter; play frost }
+rule strike {
+  onset=now+.005*partial+rand(0,.013)
+  pitch=pick(partial,1976,2350,2960,3170,3700,4435,5220)
+  loudness=rand(.06,.10); fall=rand(.25,.55); side=rand(-.7,.7)
+  play crystal at onset; partial=partial+1
+}
+rule scatter {
+  onset=now+.25+1.5*rand(0,1)^1.3; pitch=rand(2400,5600)
+  loudness=rand(.03,.07); side=rand(-.8,.8)
+  play fragment at onset
+}
+voice crystal[7] {
+  sine(hz=pitch,life=.7) -> level=gain(level=exp(0,loudness,fall,.0006)) -> pan(position=side) -> synth.input
+  level -> gain(level=.4) -> synth.room
+}
+voice weight {
+  sine(hz=exp(0,140,.16,55),life=.18) -> level=gain(level=exp(0,.3,.16,.0008)) -> synth.input
+  level -> gain(level=.1) -> synth.room
+}
+voice fragment[14] {
+  sine@2(hz=exactexp(0,pitch,.06,pitch*.55),life=.12,startAtZero=1,frequencyFromBlockStart=1) -> gain(level=exp(0,loudness,.09,.0005)) -> pan(position=side) -> synth.input
+}
+voice frost {
+  source.mono_noise_buffer(buffer=hiss,offset=rand(0,1.5),life=1.8) -> highpass(cutoffHz=6000) -> gain(level=exp(0,.05,1.7,.0006)) -> synth.input
+}
+output synth.sum

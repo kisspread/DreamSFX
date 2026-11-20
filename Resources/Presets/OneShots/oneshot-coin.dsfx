@@ -1,0 +1,10 @@
+sound benchmark.oneshot_coin
+preview .001 s
+tail 1.2 s
+input brightnessHz range 300 24000 default 24000
+voice coin {
+  pickup=source.sfxr(wave=square,kernelRateHz=44100,sampleBits=16,seed=1337,gainDb=-14,voiceLimit=1,attack=0,sustain=.06,punch=0,decay=.12,baseFrequency=.6,pitchChange=.3,pitchChangeSpeed=.35,pulseWidth=.15,lowpassCutoff=1,lowpassResonance=.1,outputLevel=.4) -> tone=filter.one_pole_lowpass(cutoffHz=brightnessHz)
+}
+start { play coin }
+fire coin.pickup at 0 velocity 1
+output coin.tone

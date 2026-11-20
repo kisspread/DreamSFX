@@ -1,0 +1,68 @@
+sound dwarf.clickthud
+# 五种机构共用敲击声部。presses 控制相隔 150 ms 的独立按压次数。
+clock 100 Hz
+preview 4 s
+seed 20261120
+input kind range 0 4 default 0
+input presses range 1 8 default 1
+resources {
+  hall=impulse.diffuse(3.5s,random=lcg32,dampingFloor=.03,dampingAmount=.4,dampingDecayPerSecond=1.2,attackSeconds=.025,decaySeconds=.9523809523809524,taperEnd=1)
+  brown=buffer.brown_loop(4s,random=lcg32,crossfadeFrames=0,step=.02,level=3.4)
+  white=buffer.white(4s)
+}
+bus room {
+  dry=compressor(thresholdDb=-10,kneeDb=6,ratio=8,attackSeconds=.004,releaseSeconds=.25) -> shape(drive=1.4,oversample2x=1) -> out=gain(level=.8)
+  send=room.convolution@2(ir=hall,normalize=0) -> gain(level=.55) -> dry
+}
+memory { model=0; count=0; atHit=0; ringAt=0; det=1; rootHz=410; part=0; length=0; fromHz=0; toHz=0; thudLevel=0 }
+state idle { tick buttons }
+rule buttons { if count<presses && time>=count*15/100 then press }
+rule press {
+  model=(kind>=.5)+(kind>=1.5)+(kind>=2.5)+(kind>=3.5)
+  count=count+1; atHit=now+.001; det=rand(.97,1.03)
+  rootHz=pick(model,410,520,265,235,700)*det
+  ringAt=atHit+if(model==2,.05,0)
+  if model<4 then lower
+  if model==2 then skin
+  if model==4 then skin
+  part=0; repeat pick(model,2,3,2,3,2) then excite
+  if model<2 then skin
+  if model==3 then skin
+  if model==2 then latch
+}
+rule lower {
+  fromHz=pick(model,150,125,112,92)*det; toHz=pick(model,92,78,58,46)
+  length=pick(model,.09,.06,.12,.16); thudLevel=pick(model,.5,.32,.55,.65)
+  play thud at atHit
+}
+rule latch { fromHz=88*det; toHz=52; length=.1; thudLevel=.3; play thud at ringAt }
+rule excite { play mode at ringAt; part=part+1 }
+rule skin {
+  if model==1 then bright
+  if model==4 then bright
+  if model==0 then dull
+  if model==2 then dull
+  if model==3 then dull
+}
+rule bright { play snap at atHit }
+rule dull { play knock at atHit }
+voice knock[3] {
+  let dur=pick(model,.03,.012,.035,.05,.016)
+  noise(buffer=white,offset=rand(0,2),life=dur+.02) -> lowpass(cutoffHz=pick(model,850,2600,1100,700,1500),q=1) -> gain(level=exp(0,pick(model,.2,.12,.28,.3,.3),dur,.0005)) -> pan(position=0) -> room.dry
+}
+voice snap[3] {
+  let dur=if(model==1,.012,.016)
+  noise(buffer=white,offset=rand(0,2),life=dur+.02) -> bandpass(cutoffHz=if(model==1,2600,1500),q=if(model==1,1.5,1.2)) -> gain(level=exp(0,if(model==1,.12,.3),dur,.0005)) -> pan(position=0) -> room.dry
+}
+voice thud[4] {
+  sine(hz=exp(0,fromHz,length*.8,toHz),life=length+.03) -> gain(level=line(0,.0001,.006,thudLevel)) -> gain(level=exp(0,1,.006,1,length,.0006/thudLevel)) -> shape(drive=2.4) -> room.dry
+}
+voice mode[10] {
+  let ratio=pick(part,1,pick(model,1.9,1.71,1.83,1.6,1.8),pick(model,1,2.9,1,2.6,1))
+  let hz0=rootHz*ratio*rand(.994,1.006); let hz1=hz0*rand(.999,1.001)
+  let dur=pick(part,pick(model,.07,.05,.13,.16,.028),pick(model,.05,.035,.08,.1,.02),pick(model,.05,.025,.08,.06,.02))*rand(.8,1.2)
+  let peak=pick(part,pick(model,.5,.7,.6,.6,.4),pick(model,.2,.35,.25,.3,.15),pick(model,.2,.15,.25,.12,.15))
+  sine(hz=target(hz0,hz1,.5),life=dur+.05) -> gain(level=line(0,.0001,.004,peak)) -> gain(level=exp(0,1,.004,1,dur,.0006/peak)) -> gain(level=pick(model,.12,.16,.13,.14,.1)) -> side=pan(position=0) -> room.dry
+  side -> gain(level=pick(model,.12,.1,.2,.25,.08)) -> room.send
+}
+output room.out

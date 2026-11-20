@@ -1,0 +1,60 @@
+sound small_magic.chestopen
+preview 3.8 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  # 主场先生成房间、三色噪声和颗粒。两套总线共用这条随机序列。
+  skip roomAndWhite=595228
+  pink=buffer.pink(3s)
+  skip brownAndGrain=289920
+  reflections=buffer.white(.9s)
+  hiss=buffer.white(2s,channels=1)
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+bus synth {
+  sum=gain()
+  input=gain(level=target(.8,.8*volume,.03)) -> compressor(thresholdDb=-10,kneeDb=4,ratio=4,attackSeconds=.003,releaseSeconds=.2) -> shape(drive=1.3,normalized=1) -> sum
+  room=room.decaying_noise(noise=reflections,attackSeconds=.004,decaySeconds=.14285714285714285) -> gain(level=.35) -> input
+  world.out -> sum
+}
+
+audition { at .3 cast }
+state idle {}
+state cast { enter launch }
+memory { index=0; onset=0; pitch=1568; side=0 }
+rule launch {
+  play leftHinge at now+.05; play rightHinge at now+.4; repeat 4 then arpeggio; play light at now+.7
+  all warmth at now+.8; repeat 10 then glint
+}
+rule arpeggio { play note at now+.75+.11*index; index=index+1 }
+rule glint { onset=now+rand(1.1,2.3); pitch=1568*2^rand(0,1.2); side=rand(-.8,.8); play spark at onset }
+patch hinge {
+  saw(hz=line(0,from,.3,to),life=.35) -> bandpass(cutoffHz=320,q=4) -> gain(level=exp(0,.1,.32,.001)) -> synth.input
+}
+voice leftHinge { use hinge(from=120,to=90) }
+voice rightHinge { use hinge(from=95,to=70) }
+voice note[4] {
+  let hz=pick(index,523.25,659.26,783.99,1046.5)
+  let tail=if(index==3,.9,.16)
+  square(hz=hz,life=tail+.02) -> tone=gain(level=exp(0,.14,tail,.0008)) -> synth.input
+  tone -> gain(level=.2) -> synth.room
+}
+voice light {
+  source.mono_noise_buffer(buffer=hiss,offset=rand(0,1.5),life=2.1) -> bandpass(cutoffHz=exp(0,900,1.9,4800),q=2) -> gain(level=exp(0,.0001,.9,.06,2,.0006)) -> synth.input
+}
+voice warmth(hz=[130.81,196,261.63]) {
+  triangle(hz=hz,life=2.2) -> level=gain(level=exp(0,.0001,.7,.08,2.1,.0006)) -> synth.input
+  level -> gain(level=.3) -> synth.room
+}
+voice spark[10] {
+  sine(hz=pitch,life=.35) -> gain(level=exp(0,.0001,.015,.04,.3,.0005)) -> pan(position=side) -> synth.input
+}
+output synth.sum

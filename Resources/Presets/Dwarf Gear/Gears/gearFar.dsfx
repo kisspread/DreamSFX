@@ -1,0 +1,2 @@
+instance dwarf.gearfar of dwarf.gearmesh
+kind = 2

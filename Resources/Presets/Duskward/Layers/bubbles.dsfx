@@ -1,0 +1,2 @@
+instance duskward.bubbles of duskward.tour
+solo = 9

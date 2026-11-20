@@ -1,0 +1,21 @@
+{
+  "schema": "dreamsfx/2",
+  "id": "benchmark.oneshot_explosion",
+  "seed": 5274,
+  "durationSeconds": 0.001,
+  "voiceTailSeconds": 1.2,
+  "resources": [],
+  "nodes": [
+    {"id":"burst", "type":"source.sfxr", "version":1,
+      "parameters":{
+        "wave":"noise", "kernelRateHz":44100, "sampleBits":16, "seed":1337, "gainDb":-14, "voiceLimit":1,
+        "attack":0, "sustain":0.17, "punch":0.5, "decay":0.4, "baseFrequency":0.45, "frequencySlide":-0.28,
+        "pulseWidth":0.15, "lowpassCutoff":0.55, "lowpassResonance":0.1, "outputLevel":0.4
+      }}
+  ],
+  "connections": [],
+  "timeline": [
+    {"atSeconds":0, "action":"fire", "target":{"node":"burst", "port":"fire"}, "velocity":1}
+  ],
+  "output": {"node":"burst", "port":"audio"}
+}

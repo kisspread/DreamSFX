@@ -1,0 +1,44 @@
+sound small_magic.pacwaka
+preview 2 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  # 主场先生成房间、三色噪声和颗粒。两套总线共用这条随机序列。
+  skip roomAndWhite=595228
+  pink=buffer.pink(3s)
+  skip brownAndGrain=289920
+  reflections=buffer.white(.9s)
+  hiss=buffer.white(2s,channels=1)
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+bus synth {
+  sum=gain()
+  input=gain(level=target(.8,.8*volume,.03)) -> compressor(thresholdDb=-10,kneeDb=4,ratio=4,attackSeconds=.003,releaseSeconds=.2) -> shape(drive=1.3,normalized=1) -> sum
+  room=room.decaying_noise(noise=reflections,attackSeconds=.004,decaySeconds=.14285714285714285) -> gain(level=.35) -> input
+  world.out -> sum
+}
+
+audition { at .3 cast }
+state idle {}
+state cast { enter launch }
+# 单一合成器交替做升降两种滑音，原试听页安排九次。
+input yaw range .5 2 default 1
+memory { step=0; from=540; goal=170 }
+rule launch { repeat 9 then chew }
+rule chew {
+  from=if(wrap(step,2)==0,540,170)*yaw; goal=710*yaw-from
+  play syllable at now+.05+step*.155; step=step+1
+}
+voice syllable[4] {
+  square@2(startAtZero=1,frequencyFromBlockStart=1,hz=exactexp(0,from,.08,goal),life=.10) -> tone=gain(level=exp(0,.14,.08,.0008)) -> synth.input
+  tone -> gain(level=.05) -> synth.room
+}
+output synth.sum

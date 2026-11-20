@@ -1,0 +1,28 @@
+sound abyssal.drone
+# 缓慢拍频的五度低音
+preview 40 s
+clock 10 Hz
+seed 20261110 mulberry32
+input detuneScale range .25 3 default 1
+resources {
+  seaFloor=buffer.brown_loop(11s,random=mulberry32,crossfadeFrames=4096,step=.02,level=3.5)
+  waterIR=impulse.diffuse(5s,random=mulberry32,dampingFloor=.04,dampingAmount=.5,dampingDecayPerSecond=2,attackSeconds=.03333333333333333,decaySeconds=.6666666666666666,taperEnd=1)
+}
+
+bus sea {
+  master=gain(level=target(0,.78,1)) -> limiter=compressor(thresholdDb=-6,kneeDb=6,ratio=20,attackSeconds=.003,releaseSeconds=.3)
+  room=room.convolution(ir=waterIR) -> master
+}
+
+bus fifths {
+  mix=gain(level=target(0,1,.25)) -> sea.master
+  mix -> gain(level=1.5) -> sea.room
+}
+voice string(root=[73.42,110,164.81,246.94,369.99]) {
+  let beatHz=rand(.03,.11)*detuneScale
+  sine(hz=root) -> pair=gain(level=.022-i*.003) -> fifths.mix
+  sine(hz=root+beatHz) -> pair
+}
+
+start { all string }
+output sea.limiter

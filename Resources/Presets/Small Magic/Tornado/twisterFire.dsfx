@@ -1,0 +1,2 @@
+instance small_magic.twisterfire of small_magic.twisterplain
+material = 1

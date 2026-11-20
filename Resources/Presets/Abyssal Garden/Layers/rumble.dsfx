@@ -1,0 +1,20 @@
+sound abyssal.rumble
+# 深海轰鸣
+preview 24 s
+clock 10 Hz
+seed 20261110 mulberry32
+input cutoffHz range 60 300 default 150
+resources {
+  seaFloor=buffer.brown_loop(11s,random=mulberry32,crossfadeFrames=4096,step=.02,level=3.5)
+}
+
+bus sea {
+  master=gain(level=target(0,.78,1)) -> limiter=compressor(thresholdDb=-6,kneeDb=6,ratio=20,attackSeconds=.003,releaseSeconds=.3)
+}
+
+bus rumble {
+  noise(buffer=seaFloor) -> lowpass(cutoffHz=cutoffHz,q=.7) -> body=gain(level=.34) -> gain(level=target(0,1,.25)) -> sea.master
+  sine(hz=.07) -> gain(level=.11) -> body:level
+  sine(hz=.113) -> gain(level=.08) -> body:level
+}
+output sea.limiter

@@ -1,0 +1,25 @@
+sound music.lantern_duet
+preview 23 s
+seed 5107
+input touch range .2 1 default .68
+resources { wood=impulse.room(1.2s); hall=impulse.room(3.2s) }
+patch comb { tine=voice.music_box(gainDb=-16,voiceLimit=16) }
+patch strings { keys=voice.modal_piano(gainDb=-12,voiceLimit=16) }
+bus master { out=gain(level=.85) }
+bus boxBus { in=lowpass(cutoffHz=6800,q=.6) -> side=pan(position=-.55) -> master.out
+             in -> room(ir=wood) -> gain(level=.15) -> side }
+bus pianoBus { in=lowpass(cutoffHz=3400,q=.7) -> side=pan(position=.45) -> master.out
+               in -> room(ir=hall) -> gain(level=.28) -> side }
+phrase lantern {
+  C5/4 E5/8 G5/8 3:2(A5/8 G5/8 E5/8) D5/4 | C5/2. E5/4~ |
+  E5/4 G5/4 A5/4@.8 E5/4 | [C5 E5 G5]/2 R/4 G4/4
+}
+track melody uses comb -> boxBus.in {
+  tempo 96; repeat 2; velocity touch
+  play lantern
+}
+track answer uses strings -> pianoBus.in {
+  at .5; tempo 80; transpose -7; velocity .48
+  pedal [.1-1.2, 2-3.5]; play lantern
+}
+output master.out

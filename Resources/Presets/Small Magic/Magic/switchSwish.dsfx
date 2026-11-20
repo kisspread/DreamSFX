@@ -1,0 +1,42 @@
+sound small_magic.switchswish
+preview 7.5 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  roomIR=impulse.room(3.2s)
+  white=buffer.white(3s)
+  pink=buffer.pink(3s)
+  brown=buffer.brown(3s)
+  emberWhite=buffer.white(.04s,channels=1)
+  skip extraRoomAndHiss=182400
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  room=room(ir=roomIR) -> gain(level=.8) -> mix
+  hills=echo(seconds=.71) -> ridge=lowpass(cutoffHz=1250,q=.5) -> gain(level=.85) -> mix
+  ridge -> gain(level=.34) -> delay(seconds=128/48000) -> hills
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+
+input emphasis range .1 1 default .3
+memory { mark=1; which=0; radius=1; span=.6; intensity=.084; side=1 }
+state idle { tick advance }
+rule advance { if time>=.3+.75*mark && mark<8 then swish }
+rule swish {
+  which=wrap(mark,6); radius=1+.12*which; span=.6+.05*which
+  intensity=(.28+.13*which)*emphasis; side=if(wrap(which,2)==1,1,-1)
+  play trace; mark=mark+1
+}
+voice trace[2] {
+  noise(buffer=white,offset=rand(0,2.5),life=span+.05) -> gap=bandpass(cutoffHz=exp(0,500*radius,.55*span,3800*radius,span,1500*radius),q=1.1) -> breath=gain(level=swell(span,.9,.8)) -> body=gain(level=intensity) -> swept=pan(position=line(0,-.75*side,span,.75*side)) -> world.mix
+  gap -> delay.linear(delaySeconds=line(0,.006,.6*span,.0012,span,.004)) -> breath
+  noise(buffer=white,offset=rand(0,2.5),life=span+.1) -> highpass(cutoffHz=6000) -> gain(level=swell(span,.3,.7,.04)) -> body
+  sine(hz=exp(0,52,span,74),life=span*1.2+.02) -> gain(level=swell(span*1.2,.25,.9)) -> body
+  swept -> gain(level=.6) -> world.room
+}
+output world.out

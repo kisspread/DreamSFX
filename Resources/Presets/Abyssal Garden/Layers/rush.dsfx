@@ -1,0 +1,35 @@
+sound abyssal.rush
+# 游动水阻
+preview 14 s
+clock 10 Hz
+seed 20261110 mulberry32
+input speed range 0 30 default 18
+resources {
+  seaFloor=buffer.brown_loop(11s,random=mulberry32,crossfadeFrames=4096,step=.02,level=3.5)
+}
+
+bus sea {
+  master=gain(level=target(0,.78,1)) -> limiter=compressor(thresholdDb=-6,kneeDb=6,ratio=20,attackSeconds=.003,releaseSeconds=.3)
+}
+
+bus water {
+  loop=noise(buffer=seaFloor,playbackRate=.63)
+  loop -> band=bandpass(cutoffHz=300,q=.9) -> swim=gain(level=0) -> gain(level=target(0,1,.25)) -> sea.master
+}
+
+memory {
+  cameraY=-8; velocity=0
+}
+
+rule camera {
+  velocity=speed
+  water.swim:level=target(.5*min(velocity/26,1)^1.2,.3) at now+.05
+  water.band:cutoffHz=target(220+14*velocity,.3) at now+.05
+}
+
+state idle { tick update }
+rule update { if time>0 then cycle }
+rule cycle {
+  call camera
+}
+output sea.limiter

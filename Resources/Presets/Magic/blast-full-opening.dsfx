@@ -1,0 +1,297 @@
+sound benchmark.blast_full_opening
+# 蓄力时符文依次成形。闪光先到，冲击波掠过，主爆之后留下耳鸣、碎石、余烬和风。
+clock 100 Hz
+preview 5.84 s
+seed 132721
+input volume range .05 1 default .8
+input charge      range 0 1       default 0
+input distance    range 0 1000    default 20
+input pan         range -1 1      default 0
+input shockRadius range 0 10000   default 0
+input shockPower  range 0 1       default 1
+input broken      range 0 1000000 default 0
+
+audition {
+  charge = clamp(time/4.4,0,1)
+  pan = (12*16-16*6)/(sqrt(16^2+6^2)*20)
+  shockRadius = max(0,(time-5.8)*340)
+  broken = if(time>=6.1,90,0)
+  at .01 gather
+  at 4.55 fall
+  at 4.9 silence
+  at 5.8 impact
+}
+
+resources {
+  roomIR = impulse.room(3.2s)
+  white = buffer.white(3s)
+  pink = buffer.pink(3s)
+  brown = buffer.brown(3s)
+  emberWhite = buffer.white(.04s,channels=1)
+  # 参照试听页初始化时还生成这两个缓冲。保留它们占用的随机序列位置。
+  skip boardRoomStereo = 86400
+  skip boardHissMono = 96000
+}
+
+memory {
+  fallTime=.25; nextBeat=0; written=0
+  rune=0; pitch=110; size=0; span=0; scale=1; turn=1; glintNo=0; height=0
+  rangeAtFlash=0; side=0; near=1; level=1; hitAt=0; dullHz=20000
+  wavePending=0; wavePower=0; brokenBefore=0; debrisCheck=0; amount=0
+}
+start { play world }
+state idle {}
+state gather    { enter begin; tick chargeUp }
+state fade      { enter cancelGather }
+state fall      { enter drop }
+state silence   {}
+state impact    { enter flash; tick wavefront }
+state mainBlast { tick afterCrack }
+state ringing   { tick recover }
+state tail      { tick secondary }
+
+rule begin {
+  written=0; nextBeat=now+.3
+  play gatherBus
+  all shimmer
+}
+
+rule chargeUp {
+  world.pre:level=target(.5+.22*charge^6,.06)
+  world.beds:level=target(1-.85*charge,.2)
+  if nextBeat<=now+.03 then heartbeat
+  repeat clamp(6.7*charge-written-.05,0,6-written) then writeRune
+}
+rule heartbeat {
+  play pulse at max(now,nextBeat)
+  nextBeat=nextBeat+max(.065,.5-.45*charge)
+}
+rule runePitch { pitch=pick(rune,110,130.81,146.83,164.81,196,220) }
+rule writeRune {
+  rune=written; call runePitch
+  scale=1+.12*rune; span=.6+.05*rune; size=.28+.13*rune
+  turn=if(wrap(rune,2)==1,1,-1)
+  play glyph
+  glintNo=0; repeat 9 then glint
+  written=written+1
+}
+rule glint {
+  play runeGlint at now+span*(.25+.1*glintNo)+.02*rand(0,1)
+  glintNo=glintNo+1
+}
+rule cancelGather {
+  stop gatherBus after .85; stop shimmer after .85
+  gatherBus.dronePitch:value=target(-700,.15)
+  gatherBus.bus:level=target(0,.4/3)
+  world.pre:level=target(.5,.1); world.beds:level=target(1,.6)
+}
+
+rule drop {
+  stop gatherBus after fallTime+.05; stop shimmer after fallTime+.05
+  gatherBus.shake:level=target(0,.012); gatherBus.depth:level=target(0,.01)
+  gatherBus.high:level=target(0,.02); gatherBus.bus:level=target(.9,.02)
+  gatherBus.whine:level=target(0,.015); gatherBus.roar:level=target(0,.015)
+  gatherBus.rise:level=target(0,.015); gatherBus.hiss:level=target(.3,.03)
+  gatherBus.intake:level=target(.95,.03); gatherBus.intakeBand:cutoffHz=target(7500,.09)
+  world.pre:level=target(.5,.02)
+  play fallingSpark
+  rune=0; repeat 6 then passGlass
+}
+rule passGlass {
+  call runePitch
+  height=pick(rune,3.5,7.5,11.5,16,21,27)
+  turn=if(wrap(rune,2)==1,-.3,.3)
+  play glass at now+(1-height/27)*fallTime
+  rune=rune+1
+}
+
+# 闪光时决定传播时间。主爆、耳鸣按音频时钟预约在同一采样时刻。
+rule flash {
+  rangeAtFlash=distance; side=pan; near=max(0,1-rangeAtFlash/110); level=.3+.7*near
+  hitAt=now+.14+min(rangeAtFlash/343,.2)
+  dullHz=20000*(2000/20000)^min(1,near*1.1)
+  wavePending=1; brokenBefore=broken; debrisCheck=now+.42
+  world.hush:level=line(0,1,.006,0,hitAt-now-.004,0,hitAt-now,1)
+  world.ears:cutoffHz=exp(0,20000,.1,20000,.45,dullHz,1.2,dullHz,5,20000) at hitAt
+  world.beds:level=line(0,.08,2.5,.08,10,1) at hitAt
+  world.pre:level=line(0,.5,.004,.95,1.4,.95,5.5,.5) at hitAt
+  play tinnitus at hitAt
+  play firstCrack at hitAt; play secondCrack at hitAt+.045
+  play roar at hitAt; play weight at hitAt
+  play ground at hitAt; play fire at hitAt
+  repeat 70 then scatterEmber
+}
+rule wavefront  { call secondary; if now>=hitAt then heardBlast }
+rule heardBlast { enter mainBlast }
+rule afterCrack { call secondary; if now>=hitAt+.1 then hearRinging }
+rule hearRinging { enter ringing }
+rule recover { call secondary; if now>=hitAt+6.6 then hearTail }
+rule hearTail { enter tail }
+
+rule secondary {
+  if wavePending==1 && shockRadius>=rangeAtFlash then passingWave
+  if debrisCheck>0 && now>=debrisCheck then countRubble
+}
+rule passingWave { wavePending=0; wavePower=min(1,1.2*shockPower); play gust }
+rule countRubble {
+  debrisCheck=0
+  if broken-brokenBefore>4 then shedRubble
+}
+rule shedRubble {
+  amount=min(1,.25+(broken-brokenBefore)/200)
+  repeat 8+30*amount then scatterStone
+}
+rule scatterStone { play stone at now+3.2*rand(0,1)^1.4 }
+rule scatterEmber { play ember at hitAt+.5+9.5*rand(0,1)^1.7 }
+
+voice world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=follow(.9,.9*volume,.03))
+  beds=gain() -> mix
+  room=room(ir=roomIR) -> gain(level=.8) -> mix
+  hills=echo(seconds=.71) -> ridge=lowpass(cutoffHz=1250,q=.5) -> gain(level=.85) -> mix
+  ridge -> gain(level=.34) -> delay(seconds=128/48000) -> hills
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+
+voice gatherBus {
+  bus=gain(level=follow(0,.9*(1+.45*charge^8),.06)) -> world.mix
+  bus -> gain(level=.3) -> world.room
+
+  # 五个低音共享一条移调控制。蓄力同时打开滤波、加强饱和、加快振幅调制。
+  dronePitch=control.value(value=follow(0,1200*charge^1.6,.06))
+  low=lowpass(cutoffHz=follow(90,90+2600*charge^2,.06),q=2.5) -> shake=gain() -> gain(level=follow(1,1+3*charge,.06)) -> shape(drive=2) -> gain(level=follow(.03,.03+.44*charge^1.6,.06)) -> bus
+  a=saw(hz=41.2) -> gain(level=.5) -> low
+  b=saw(hz=41.5) -> gain(level=.5) -> low
+  c=square(hz=82.1) -> gain(level=.2) -> low
+  d=sine(hz=41.2) -> gain(level=.9) -> low
+  e=saw(hz=61.7) -> gain(level=.22) -> low
+  dronePitch -> a:cents; dronePitch -> b:cents; dronePitch -> c:cents
+  dronePitch -> d:cents; dronePitch -> e:cents
+  sine(hz=follow(2.5,2.5+15*charge^2,.06)) -> depth=gain(level=follow(0,.5*charge,.06)) -> shake:level
+
+  risePitch=control.value(value=follow(0,2400*charge^1.5,.06))
+  rising=bandpass(cutoffHz=follow(300,300+3400*charge^1.5,.06),q=1.2) -> rise=gain(level=follow(0,.26*charge^2,.06)) -> bus
+  r1=saw(hz=110) -> gain(level=.5) -> rising
+  r2=saw(hz=110.7) -> gain(level=.5) -> rising
+  r3=saw(hz=165.3) -> gain(level=.3) -> rising
+  r4=saw(hz=220.4) -> gain(level=.25) -> rising
+  risePitch -> r1:cents; risePitch -> r2:cents; risePitch -> r3:cents; risePitch -> r4:cents
+
+  whinePitch=control.value(value=follow(0,3600*charge^1.3,.06))
+  whine=gain(level=follow(0,.11*charge^3,.06)) -> bus
+  w1=sine(hz=520) -> gain(level=.6) -> whine
+  w2=saw(hz=523) -> gain(level=.1) -> whine
+  w3=sine(hz=782) -> gain(level=.3) -> whine
+  whinePitch -> w1:cents; whinePitch -> w2:cents; whinePitch -> w3:cents
+  whine -> gain(level=.6) -> world.room
+
+  noise(buffer=pink,offset=rand(0,2.5)) -> lowpass(cutoffHz=follow(200,200+5200*charge^2,.06),q=.7) -> roar=gain(level=follow(0,.6*charge^2,.06)) -> bus
+  noise(buffer=white,offset=rand(0,2.5)) -> highpass(cutoffHz=follow(1200,1200+5200*charge,.06)) -> hiss=gain(level=follow(0,.13*charge^3,.06)) -> bus
+  noise(buffer=pink,offset=rand(0,2.5)) -> intakeBand=bandpass(cutoffHz=follow(250,250+3200*charge^1.5,.06),q=.9) -> intake=gain(level=follow(0,.6*charge^2,.06)) -> bus
+  high=gain(level=follow(0,.08*charge,.06)) -> bus
+  high -> gain(level=1.6) -> world.room
+}
+voice shimmer(ratio=[1,1.26,1.5,1.89,2.52]) {
+  sine(hz=1568*ratio*rand(.995,1.005)) -> flicker=gain(level=.2) -> gatherBus.high
+  sine(hz=rand(.7,3)) -> gain(level=.2) -> flicker:level
+}
+voice pulse[4] {
+  sine(hz=exp(0,78,.12,38),life=.18) -> gain(level=exp(0,.0001,.005,.1+1.15*charge,.16,.0001)) -> gatherBus.bus
+}
+
+voice glyph[6] {
+  bus=gain(level=size) -> sweepPan=pan(position=line(0,-.75*turn,span,.75*turn)) -> world.mix
+  sweepPan -> gain(level=.6) -> world.room
+  noise(buffer=white,offset=rand(0,2.5),life=span+.05) -> sweep=bandpass(cutoffHz=exp(0,500*scale,span*.55,3800*scale,span,1500*scale),q=1.1) -> swish=gain(level=swell(span,.9,.8)) -> bus
+  sweep -> delay(seconds=line(0,.006,span*.6,.0012,span,.004)) -> swish
+  noise(buffer=white,offset=rand(0,2.5),life=span+.1) -> highpass(cutoffHz=6000) -> gain(level=swell(span,.3,.7,.04)) -> bus
+  bend=control.value(value=line(0,-250,span*1.5,150))
+  tone=gain(level=swell(span*1.5,.07,.6)) -> bus
+  tone -> gain(level=1.5) -> world.room
+  t1=sine@2(startAtZero=1,frequencyFromBlockStart=0,hz=pitch*8,life=span*1.5+.02) -> tone
+  t2=sine@2(startAtZero=1,frequencyFromBlockStart=0,hz=pitch*12.02,life=span*1.5+.02) -> tone
+  t3=sine@2(startAtZero=1,frequencyFromBlockStart=0,hz=pitch*16,life=span*1.5+.02) -> tone
+  t4=sine@2(startAtZero=1,frequencyFromBlockStart=0,hz=pitch*24.05,life=span*1.5+.02) -> tone
+  bend -> t1:cents; bend -> t2:cents; bend -> t3:cents; bend -> t4:cents
+  sine(hz=exp(0,52,span,74),life=span*1.2+.02) -> gain(level=swell(span*1.2,.25,.9)) -> bus
+}
+voice runeGlint[16] {
+  sine(hz=pitch*(16+3*glintNo),life=.09) -> gain(level=exp(0,.0001,.004,.05*size,.08,.0001)) -> out=pan(position=rand(-.8,.8)) -> world.mix
+  out -> gain(level=.9) -> world.room
+}
+voice fallingSpark {
+  sine(hz=exp(0,5200,fallTime,230),life=fallTime+.02) -> gain(level=.2) -> zip=gain(level=line(0,.5,fallTime,1.3,fallTime+.015,0)) -> world.mix
+  triangle(hz=exp(0,2600,fallTime,115),life=fallTime+.02) -> gain(level=.1) -> zip
+  zip -> gain(level=.4) -> world.room
+}
+voice glass[6] {
+  sine(hz=pitch*4,life=.15) -> hit=gain(level=exp(0,.0001,.003,.2,.13,.0001)) -> out=pan(position=turn) -> world.mix
+  sine(hz=pitch*11.04,life=.15) -> hit
+  out -> gain(level=.6) -> world.room
+}
+
+voice gust {
+  noise(buffer=pink,offset=rand(0,2.5),life=1.7) -> bandpass(cutoffHz=exp(0,260,.25,1500,1.1,380),q=.8) -> gain(level=exp(0,.0001,.18,.75*wavePower+.0001,1.6,.0001)) -> out=pan(position=line(0,.8*side,1.2,-.6*side)) -> world.mix
+  out -> gain(level=.25) -> world.room
+  noise(buffer=brown,offset=rand(0,2.5),life=1.2) -> lowpass(cutoffHz=140) -> gain(level=exp(0,.0001,.08,1.4*wavePower+.0001,1.1,.0001)) -> world.mix
+}
+patch crack {
+  noise(buffer=white,offset=rand(0,2.5),life=length+.02) -> highpass(cutoffHz=cut) -> gain(level=exp(0,strength*level,length,.0001)) -> out=pan(position=.6*side) -> world.mix
+  out -> gain(level=.35) -> world.room
+  out -> gain(level=.6) -> world.hills
+}
+voice firstCrack  { use crack(length=.11,cut=1200,strength=1) }
+voice secondCrack { use crack(length=.17,cut=700,strength=.6) }
+
+voice roar {
+  noise(buffer=pink,offset=rand(0,2.5),life=3.7) -> lowpass(cutoffHz=exp(0,4200,1.5,170),q=.6) -> dry=gain(level=exp(0,1.15*level,3.6,.0001)) -> shelf(cutoffHz=130,gainDb=10) -> world.mix
+  dry -> gain(level=.3) -> world.room
+  dry -> gain(level=.7) -> world.hills
+}
+voice weight {
+  sine(hz=exp(0,86,.5,30),life=6.1) -> gain(level=exp(0,.0001,.008,1.5,6,.0001)) -> shape(drive=2.6) -> gain(level=level) -> world.mix
+  sine(hz=exp(0,52,1.4,24),life=7.6) -> gain(level=exp(0,.0001,.02,1.3,7.5,.0001)) -> shape(drive=2.2) -> gain(level=.9*level) -> world.mix
+  triangle(hz=exp(0,140,.18,48),life=.4) -> gain(level=exp(0,level,.36,.0001)) -> world.mix
+  saw(hz=55,life=2.6) -> growl=lowpass(cutoffHz=210,q=1) -> motion=gain() -> gain(level=exp(0,.0001,.01,.6*level,2.5,.0001)) -> world.mix
+  saw(hz=55.7,life=2.6) -> growl
+  saw(hz=82.4,life=2.6) -> growl
+  sine(hz=11*rand(.9,1.1),life=2.6) -> gain(level=.45) -> motion:level
+  sine(hz=7.3*rand(.9,1.1),life=2.6) -> gain(level=.45) -> motion:level
+}
+voice ground {
+  sine(hz=2.7*rand(.9,1.1),life=8.2) -> gain(level=.2) -> motion:level
+  sine(hz=4.3*rand(.9,1.1),life=8.2) -> gain(level=.2) -> motion:level
+  sine(hz=.8*rand(.9,1.1),life=8.2) -> gain(level=.2) -> motion:level
+  noise(buffer=brown,offset=rand(0,2.5),life=8.2) -> lowpass(cutoffHz=150,q=.7) -> motion=gain() -> gain(level=exp(0,.0001,.1,level,2.5,.42*level,5,.12*level,7.9,.012*level,8.15,.0001)) -> world.mix
+}
+voice fire {
+  sine(hz=5.3*rand(.9,1.1),life=6.2) -> gain(level=.55/3) -> motion:level
+  sine(hz=.9*rand(.9,1.1),life=6.2) -> gain(level=.55/3) -> motion:level
+  sine(hz=8.1*rand(.9,1.1),life=6.2) -> gain(level=.55/3) -> motion:level
+  noise(buffer=pink,offset=rand(0,2.5),life=6.2) -> bandpass(cutoffHz=340,q=.6) -> motion=gain() -> gain(level=exp(0,.0001,.25,.4*level,2.5,.06*level,6,.0001)) -> out=pan(position=.5*side) -> world.mix
+  out -> gain(level=.3) -> world.room
+}
+
+# 耳鸣直达压缩器前级，世界静音和听觉低通只作用于外部声音。
+voice tinnitus {
+  sine(hz=5900,life=6.6) -> envelope=gain(level=exp(0,.0001,.4,.022*near^2+.0001,6.5,.0001)) -> world.pre
+  sine(hz=6035,life=6.6) -> envelope
+}
+
+# 方括号是同时发声的槽数。每次触发独立抽取参数，声部结束后归还槽位。
+voice ember[12] {
+  let speed=rand(.5,2.1)
+  source.grain_once(buffer=emberWhite,decaySeconds=.006,playbackRate=speed,life=.04/speed) -> bandpass(cutoffHz=rand(2200,6700),q=2) -> gain(level=rand(.05,.25)*near) -> out=pan(position=side+rand(-.5,.5)) -> world.mix
+  out -> gain(level=.2) -> world.room
+}
+voice stone[12] {
+  let length=rand(.07,.32)
+  let peak=rand(.15,.65)*amount
+  noise(buffer=brown,offset=rand(0,2.5),life=length+.02) -> lowpass(cutoffHz=rand(260,1360)) -> gain(level=exp(0,peak,length,.0001)) -> out=pan(position=side+rand(-.35,.35)) -> world.mix
+  out -> gain(level=.2) -> world.room
+}
+
+output world.out

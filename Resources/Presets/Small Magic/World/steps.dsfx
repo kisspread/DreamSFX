@@ -1,0 +1,80 @@
+sound small_magic.steps
+preview 11 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  # 主场先生成房间、三色噪声和颗粒。两套总线共用这条随机序列。
+  skip roomAndWhite=595228
+  pink=buffer.pink(3s)
+  skip brownAndGrain=289920
+  reflections=buffer.white(.9s)
+  hiss=buffer.white(2s,channels=1)
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+bus synth {
+  sum=gain()
+  input=gain(level=target(.8,.8*volume,.03)) -> compressor(thresholdDb=-10,kneeDb=4,ratio=4,attackSeconds=.003,releaseSeconds=.2) -> shape(drive=1.3,normalized=1) -> sum
+  room=room.decaying_noise(noise=reflections,attackSeconds=.004,decaySeconds=.14285714285714285) -> gain(level=.35) -> input
+  world.out -> sum
+}
+
+audition { at .3 cast }
+state idle {}
+state cast { enter launch }
+memory { step=0; on=0; surface=0; side=.16; loudness=.15; cutoff=700; note=210; flakeAt=0; flakeHz=700; offset=0 }
+rule launch { repeat 18 then stepOn }
+rule stepOn {
+  on=now+.3+step*.45; surface=floor(step/3); side=-side; loudness=rand(.15,.21)
+  if surface<3 then dryGround
+  if surface==3 then snowFall
+  if surface==4 then ashes
+  if surface==5 then splash
+  step=step+1
+}
+rule dryGround {
+  play ground at on
+  if surface==2 then stone
+}
+rule stone { note=rand(210,300); play knock at on }
+rule snowFall { play crunch at on; play crust at on+.035 }
+rule ashes { play powder at on; repeat 3 then fleck }
+rule fleck { flakeAt=on+rand(.01,.05); flakeHz=rand(700,1600); play ashSparks at flakeAt }
+rule splash {
+  offset=rand(0,1.5); cutoff=rand(1500,2100); cutoff=rand(1500,2100)
+  play spray at on
+  note=rand(900,1400); play drop at on
+}
+voice ground[3] {
+  let duration=if(surface==2,.07,.11)
+  source.mono_noise_buffer(buffer=hiss,offset=rand(0,1.5),life=duration+.02) -> lowpass(cutoffHz=pick(surface,700,1300,3200),q=.8) -> gain(level=exp(0,loudness,duration,.0006)) -> pan(position=side) -> synth.input
+}
+voice knock[3] {
+  sine@2(startAtZero=1,frequencyFromBlockStart=1,hz=exactexp(0,note,.05,90),life=.09) -> gain(level=exp(0,loudness*.5,.07,.0005)) -> pan(position=side) -> synth.input
+}
+voice crunch[3] {
+  source.mono_noise_buffer(buffer=hiss,offset=rand(0,1.5),life=.07) -> bandpass(cutoffHz=rand(1600,2300),q=.9) -> gain(level=exp(0,loudness*.7,.06,.0006)) -> pan(position=side) -> synth.input
+}
+voice crust[3] {
+  source.mono_noise_buffer(buffer=hiss,offset=rand(0,1.5),life=.07) -> bandpass(cutoffHz=rand(2400,3100),q=.9) -> gain(level=exp(0,loudness*.5,.06,.0006)) -> pan(position=side) -> synth.input
+}
+voice powder[3] {
+  source.mono_noise_buffer(buffer=hiss,offset=rand(0,1.5),life=.09) -> lowpass(cutoffHz=2000) -> gain(level=exp(0,loudness*.8,.085,.0006)) -> pan(position=side) -> synth.input
+}
+voice ashSparks[9] {
+  square(hz=flakeHz,life=.03) -> gain(level=exp(0,loudness*.12,.02,.0004)) -> pan(position=side) -> synth.input
+}
+voice spray[3] {
+  source.mono_noise_buffer(buffer=hiss,offset=offset,life=.3) -> bandpass(cutoffHz=exp(0,cutoff,.25,500),q=.8) -> gain(level=exp(0,loudness,.28,.0006)) -> pan(position=side) -> synth.input
+}
+voice drop[3] {
+  sine@2(startAtZero=1,frequencyFromBlockStart=1,hz=exactexp(0,note,.08,400),life=.15) -> gain(level=exp(0,0,.02,0,.02,loudness*.6,.12,.0005)) -> pan(position=side) -> synth.input
+}
+output synth.sum

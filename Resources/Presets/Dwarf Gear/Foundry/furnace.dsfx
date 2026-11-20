@@ -1,0 +1,73 @@
+sound dwarf.furnace
+clock 100 Hz
+preview 32 s
+seed 20261120
+input stopAt range 6 24 default 24
+resources {
+  hall=impulse.diffuse(3.5s,random=lcg32,dampingFloor=.03,dampingAmount=.4,dampingDecayPerSecond=1.2,attackSeconds=.025,decaySeconds=.9523809523809524,taperEnd=1)
+  brown=buffer.brown_loop(4s,random=lcg32,crossfadeFrames=0,step=.02,level=3.4)
+  white=buffer.white(4s)
+}
+bus room {
+  dry=compressor(thresholdDb=-10,kneeDb=6,ratio=8,attackSeconds=.004,releaseSeconds=.25) -> shape(drive=1.4,oversample2x=1) -> out=gain(level=.8)
+  send=room.convolution@2(ir=hall,normalize=0) -> gain(level=.55) -> dry
+}
+memory {
+  nextClink=1; nextHammer=2.5; poll=1; atHit=0; part=0
+  rootHz=200; ringLevel=.06; strikePan=0; cut=1600; sendLevel=.9; weight=1
+  d0=1.8; d1=1.2; d2=.8; d3=.5; d4=.5
+  fromHz=120; toHz=55; length=.2; thudLevel=.1
+}
+start { play fire }
+state idle { tick watch }
+state cooling { enter close }
+rule watch {
+  if time>=stopAt then cool
+  if time<stopAt && time>=poll/10 then feed
+}
+rule cool { enter cooling }
+rule close {
+  fire.roar:level=target(0,.5); fire.air:level=target(0,.5); stop fire after 2
+}
+rule feed {
+  poll=poll+1
+  repeat 5 then checkClink
+  if nextHammer<now+.25 then hammer
+}
+rule checkClink { if nextClink<now+.25 then clink }
+rule clink {
+  play spark at nextClink
+  nextClink=nextClink+.08+rand(0,1)*(.5+.5*rand(0,1))
+}
+rule hammer {
+  atHit=nextHammer; rootHz=rand(175,245); ringLevel=rand(.05,.09); strikePan=rand(-.6,.6)
+  part=0; repeat 5 then excite
+  play thud at atHit
+  nextHammer=nextHammer+rand(2.5,7.5)
+}
+rule excite { play mode at atHit; part=part+1 }
+voice fire {
+  noise(buffer=brown) -> lowpass(cutoffHz=135,q=.7) -> roar=gain(level=exp(0,.0001,2,.4)) -> room.dry
+  sine(hz=.5) -> gain(level=.1) -> roar:level
+  sine(hz=1.7) -> gain(level=.05) -> roar:level
+  saw(hz=44) -> gain(level=.5) -> blower=lowpass(cutoffHz=110,q=.7) -> air=gain(level=exp(0,.0001,2,.09)) -> room.dry
+  saw(hz=44.6) -> gain(level=.5) -> blower
+}
+voice spark[6] {
+  let lifeSec=rand(.02,.055); let bandHz=rand(700,2600); let peak=rand(.04,.12); let side=rand(-.7,.7)
+  noise(buffer=white,offset=rand(0,2),life=lifeSec+.02) -> bandpass(cutoffHz=bandHz,q=1.5) -> gain(level=exp(0,peak,lifeSec,.0005)) -> pan(position=side) -> room.dry
+}
+voice thud[4] {
+  sine(hz=exp(0,fromHz,length*.8,toHz),life=length+.03) -> gain(level=line(0,.0001,.006,thudLevel)) -> gain(level=exp(0,1,.006,1,length,.0006/thudLevel)) -> shape(drive=2.4) -> room.dry
+}
+voice mode[10] {
+  let hz0=rootHz*pick(part,1,1.71,2.53,3.29,4.12)*rand(.994,1.006)
+  let hz1=hz0*rand(.999,1.001)
+  let decay=pick(part,d0,d1,d2,d3,d4)*rand(.8,1.2)
+  let peak=pick(part,1,.55,.35,.22,.12)*weight
+  sine(hz=target(hz0,hz1,.5),life=decay+.05) -> gain(level=line(0,.0001,.004,peak)) -> gain(level=exp(0,1,.004,1,decay,.0006/peak)) -> body=gain(level=ringLevel)
+  body -> gain(level=if(cut==0,1,0)) -> side=pan(position=strikePan) -> room.dry
+  body -> lowpass(cutoffHz=max(100,cut),q=.5) -> gain(level=if(cut>0,1,0)) -> side
+  side -> gain(level=sendLevel) -> room.send
+}
+output room.out

@@ -1,0 +1,54 @@
+sound abyssal.whalenow
+# 立即唱出一句鲸歌
+preview 9 s
+clock 10 Hz
+seed 20261110 mulberry32
+input pitchScale range .5 2 default 1
+resources {
+  seaFloor=buffer.brown_loop(11s,random=mulberry32,crossfadeFrames=4096,step=.02,level=3.5)
+  waterIR=impulse.diffuse(5s,random=mulberry32,dampingFloor=.04,dampingAmount=.5,dampingDecayPerSecond=2,attackSeconds=.03333333333333333,decaySeconds=.6666666666666666,taperEnd=1)
+  skip fiveMutedDronePairs = 5
+}
+
+bus sea {
+  master=gain(level=target(0,.78,1)) -> limiter=compressor(thresholdDb=-6,kneeDb=6,ratio=20,attackSeconds=.003,releaseSeconds=.3)
+  room=room.convolution(ir=waterIR) -> master
+}
+
+bus whaleMix {
+  level=gain(level=target(0,1,.25)) -> sea.master
+  level -> gain(level=2) -> sea.room
+}
+voice whale[2] {
+  pitch=triangle(hz=440) -> amp=gain(level=0) -> side=pan(position=0) -> whaleMix.level
+}
+
+memory {
+  noteAt=0; fromHz=0; toHz=0; duration=0; attack=0; peak=0
+  whaleSlot=0; nextwhale=12
+}
+
+start { all whale; noteAt=now+.05; call whalePhrase }
+
+rule whaleDue {
+  noteAt=now+.05; call whalePhrase
+  nextwhale=noteAt+rand(20,50)
+}
+rule whalePhrase { repeat floor(2+rand(0,2)) then whaleNote }
+rule whaleNote {
+  fromHz=rand(170,380); duration=rand(1.6,3.2); toHz=fromHz*rand(.6,1.7)
+  peak=.08; attack=duration*.4
+  whale[whaleSlot].side:position=rand(-.7,.7) at noteAt
+  whale[whaleSlot].pitch:hz=keyexp(0,fromHz*pitchScale,duration,toHz*pitchScale) at noteAt
+  whale[whaleSlot].amp:level=line(0,0,attack,peak) at noteAt
+  whale[whaleSlot].amp:level=target(0,(duration-attack)/5) at noteAt+attack
+  whaleSlot=wrap(whaleSlot+1,2)
+  noteAt=noteAt+.8*duration
+}
+
+state idle { tick update }
+rule update { if time>0 then cycle }
+rule cycle {
+  if now+.05>nextwhale then whaleDue
+}
+output sea.limiter

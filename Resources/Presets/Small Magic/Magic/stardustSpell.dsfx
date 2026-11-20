@@ -1,0 +1,55 @@
+sound small_magic.stardustspell
+preview 4.5 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  # 主场先生成房间、三色噪声和颗粒。两套总线共用这条随机序列。
+  skip roomAndWhite=595228
+  pink=buffer.pink(3s)
+  skip brownAndGrain=289920
+  reflections=buffer.white(.9s)
+  hiss=buffer.white(2s,channels=1)
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+bus synth {
+  sum=gain()
+  input=gain(level=target(.8,.8*volume,.03)) -> compressor(thresholdDb=-10,kneeDb=4,ratio=4,attackSeconds=.003,releaseSeconds=.2) -> shape(drive=1.3,normalized=1) -> sum
+  room=room.decaying_noise(noise=reflections,attackSeconds=.004,decaySeconds=.14285714285714285) -> gain(level=.35) -> input
+  world.out -> sum
+}
+
+audition { at .3 cast }
+state idle {}
+state cast { enter launch }
+memory { index=0; u=0; grainAt=0; hz=700; loud=.04; fall=.16; azimuth=0 }
+rule launch { all fifth; play shimmer; repeat 44 then scatter; all crown at now+2.05 }
+rule scatter {
+  u=index/44; grainAt=now+.15+1.7*u^1.35+rand(0,.02)
+  hz=700*2^(u*2.7+rand(0,.25)); loud=rand(.04,.09); fall=rand(.16,.26); azimuth=rand(-.8,.8)
+  play dust at grainAt; index=index+1
+}
+bus spell {
+  mix=gain() -> synth.input
+  mix -> gain(level=.6) -> synth.room
+}
+voice fifth(root=[110,165]) {
+  sine(hz=exp(0,root,2.6,root*1.5),life=3.9) -> gain(level=exp(0,.0001,1.2,pick(i,.09,.05),3.8,.0001)) -> spell.mix
+}
+voice shimmer {
+  source.mono_noise_buffer(buffer=hiss,life=3.3) -> bandpass(cutoffHz=exp(0,1200,2.8,5200),q=3) -> gain(level=exp(0,.0001,1.4,.05,3.2,.0001)) -> spell.mix
+}
+voice dust[24] {
+  sine(hz=hz,life=.3) -> gain(level=exp(0,.0001,.02,loud,fall,.0001)) -> pan(position=azimuth) -> spell.mix
+}
+voice crown(hz=[1567.98,3135.96]) {
+  sine(hz=hz,life=.95) -> gain(level=exp(0,.0001,.1,pick(i,.09,.05),.85,.0001)) -> pan(position=.15) -> spell.mix
+}
+output synth.sum

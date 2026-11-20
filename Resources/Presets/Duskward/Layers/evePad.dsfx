@@ -1,0 +1,2 @@
+instance duskward.evepad of duskward.tour
+solo = 8

@@ -1,0 +1,18 @@
+{
+  "schema": "dreamsfx/2",
+  "id": "benchmark.musicbox_small_clock",
+  "seed": 42,
+  "durationSeconds": 7.5,
+  "voiceTailSeconds": 4,
+  "resources": [],
+  "nodes": [
+    {"id":"keys", "type":"voice.music_box", "version":1, "parameters":{"gainDb":-16, "voiceLimit":16}}
+  ],
+  "connections": [],
+  "timeline": [],
+  "sequence": [
+    {"id":"clock", "node":"keys", "score":"C5/8 E5/8 G5/4 R/8 E5/8 C5/4 [C5 E5 G5]/2",
+      "bpm":96, "atSeconds":0, "repeat":2, "transpose":-12, "gate":0.8, "velocity":0.6}
+  ],
+  "output": {"node":"keys", "port":"audio"}
+}

@@ -1,0 +1,2 @@
+instance duskward.wind of duskward.tour
+solo = 2

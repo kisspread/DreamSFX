@@ -1,0 +1,24 @@
+sound music.shattered_box
+preview 3 s
+seed 132721
+input breakAt range .25 1.25 default 1
+input force range .1 1 default .7
+resources { grit=buffer.white(.04s,channels=1); chamber=impulse.room(.6s) }
+patch comb { tine=voice.music_box(gainDb=-15,voiceLimit=8) }
+bus master { out=gain(level=.8) }
+bus caseBus { in=gain() -> master.out; in -> room(ir=chamber) -> gain(level=.16) -> master.out }
+track spring uses comb -> caseBus.in {
+  tempo 96; every 1/16 x 8; velocity .58
+  pick(C6,E6,G6,C7)/16
+}
+state idle { tick watch }
+state broken { enter shatter }
+rule watch { if time>=breakAt then fracture }
+rule fracture { enter broken }
+rule shatter { stop spring; caseBus.in:level=target(0,.02); repeat 6+18*force then scatter }
+rule scatter { play shard at now+.46*rand(0,1)^2 }
+voice shard[24] {
+  let rate=rand(.55,2.2)
+  source.grain_once(buffer=grit,decaySeconds=.009,playbackRate=rate,life=.04/rate) -> bandpass(cutoffHz=rand(650,4900),q=2) -> gain(level=force*rand(.12,.5)) -> pan(position=rand(-.9,.9)) -> master.out
+}
+output master.out

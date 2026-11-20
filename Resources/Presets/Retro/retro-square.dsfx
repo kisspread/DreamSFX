@@ -1,0 +1,10 @@
+sound benchmark.retro_square
+preview .21 s
+tail .12 s
+input transposeBy range -12 12 default 0
+patch pulse { osc=voice.retro_pulse(gainDb=-14,voiceLimit=1,dutyCycle=.5) }
+track reed uses pulse {
+  at .01; tempo 150; velocity .6; transpose transposeBy
+  A4/8
+}
+output reed.osc

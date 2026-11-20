@@ -1,0 +1,36 @@
+sound abyssal.wash
+# 水面浪涌
+preview 24 s
+clock 10 Hz
+seed 20261110 mulberry32
+input depthM range -30 2 default -8
+resources {
+  seaFloor=buffer.brown_loop(11s,random=mulberry32,crossfadeFrames=4096,step=.02,level=3.5)
+}
+
+bus sea {
+  master=gain(level=target(0,.78,1)) -> limiter=compressor(thresholdDb=-6,kneeDb=6,ratio=20,attackSeconds=.003,releaseSeconds=.3)
+}
+
+bus water {
+  loop=noise(buffer=seaFloor,playbackRate=.63)
+  loop -> bandpass(cutoffHz=420,q=.5) -> swell=gain(level=1) -> surface=gain(level=.25) -> gain(level=target(0,1,.25)) -> sea.master
+  sine(hz=.09) -> gain(level=.3) -> swell:level
+  sine(hz=.151) -> gain(level=.25) -> swell:level
+}
+
+memory {
+  cameraY=-8; velocity=0
+}
+
+rule camera {
+  cameraY=depthM
+  water.surface:level=target(.25+.55*clamp(1+cameraY/30,0,1)^2,.5) at now+.05
+}
+
+state idle { tick update }
+rule update { if time>0 then cycle }
+rule cycle {
+  call camera
+}
+output sea.limiter

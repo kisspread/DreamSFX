@@ -1,0 +1,169 @@
+sound small_magic.twisterplain
+preview 15 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  roomIR=impulse.room(3.2s)
+  white=buffer.white(3s)
+  pink=buffer.pink(3s)
+  brown=buffer.brown(3s)
+  emberWhite=buffer.white(.04s,channels=1)
+  skip extraRoomAndHiss=182400
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  room=room(ir=roomIR) -> gain(level=.8) -> mix
+  hills=echo(seconds=.71) -> ridge=lowpass(cutoffHz=1250,q=.5) -> gain(level=.85) -> mix
+  ridge -> gain(level=.34) -> delay(seconds=128/48000) -> hills
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+
+# 同一场龙卷风的三种材质。0 为风，1 为火，2 为霜。
+input material range 0 2 default 0
+input distance range 0 100 default 12.727922061357855
+input azimuth range -1 1 default -.9103664774626048
+input force range 0 1 default 1
+memory {
+  begun=0; struck=0; ended=0; flash=0; previousFlash=0; power=0; fire=0; frost=0
+  close=0; audible=0; written=0; ringSize=.6; span=.7; sway=1; scale=1
+  riseAt=0; arrives=0; slap=0; after=0; length=.07; cutoff=2200; impact=1.2
+  callPan=0; ignored=0; spitAt=0; amount=0
+}
+state idle { tick frame }
+rule frame { if time>0 then update }
+rule update {
+  previousFlash=flash; flash=0
+  if time<6 then lightning
+  if time>=.3 && begun==0 then startGale
+  if time>=6.2 && struck==0 then slam
+  if time>=9 && ended==0 then endGale
+  if begun==1 && ended==0 then feed
+  if begun==1 && struck==0 && flash>0 && previousFlash==0 then distant
+}
+rule lightning { flash=rand(0,1)<.06 }
+rule startGale {
+  begun=1; close=max(0,1-distance/80); audible=max(0,1-distance/110)
+  play tornado; all whistle; play approach
+}
+rule feed {
+  power=clamp((time-.3)*.25,0,force)
+  fire=if(time>1.8 && floor(material+.5)==1,1,0)
+  frost=if(time>1.8 && floor(material+.5)==2,1,0)
+  tornado.post:level=target((.03+.2*power^2)*(.5+.5*close)*(1+.35*fire),.1)
+  tornado.depth:level=target(.4*power,.1)
+  tornado.floor:level=target(.5*power^2*(.4+.6*close),.1)
+  world.pre:level=target(.5+.2*power*close,.2)
+  tornado.roar:level=target(1.4*power,.1)
+  tornado.mid:level=target(1.7*power,.1)
+  tornado.hiss:level=target(.22*power+.2*frost,.1)
+  tornado.turn:hz=target(2.5+1.2*power,.1)
+  tornado.howl:level=target(.5*power*(1+frost)*(.3+.7*close),.1)
+  if written<3 && power/.3>pick(min(2,written),.1,.4,.7) then writeRing
+  if fire>.2 then rollingEmber
+  if frost>.2 then rollingIce
+  world.beds:level=target(1-.75*power,.3)
+}
+rule writeRing {
+  sway=1+.12*(1+2*written); span=.6+.05*(1+2*written); ringSize=(.28+.13*(1+2*written))*.6*(.4+.6*close)
+  play seal; written=written+1
+}
+rule rollingEmber { if rand(0,1)<dt*45*fire then blowEmber }
+rule blowEmber { play embers }
+rule rollingIce { if rand(0,1)<dt*22*frost then blowIce }
+rule blowIce { ignored=rand(.8,2.3)+rand(-.5,.5); play ice }
+rule distant { callPan=azimuth+rand(-.5,.5); ignored=rand(.75,1.15); play rumble }
+rule endGale {
+  ended=1
+  tornado.body:level=target(0,.4/3); tornado.howl:level=target(0,.4/3); tornado.floor:level=target(0,.4/3)
+  stop tornado after .85; stop whistle after .85
+  world.beds:level=target(1,1.5); world.pre:level=target(.5,.5)
+}
+rule slam {
+  struck=1; arrives=now+min(distance/343,.25); slap=now+.3; amount=.35+.65*audible
+  play under at arrives
+  after=0; length=.07; cutoff=2200; impact=1.2; play clap at arrives+after
+  after=.035; length=.1; cutoff=1200; impact=.9; play clap at arrives+after
+  after=.09; length=.2; cutoff=500; impact=.8; play clap at arrives+after
+  repeat 16 then crackle
+  play impactWeight at arrives; play thunder at arrives; play groundWeight at slap
+}
+rule crackle { spitAt=arrives+.18*rand(0,1)^1.5; play static at spitAt }
+
+voice tornado {
+  body=gain(level=line(0,0,.25,1)) -> rough=gain() -> shape(drive=3) -> post=gain(level=.05) -> filter.lowshelf(cutoffHz=110,gainDb=11) -> bodyMix=gain() -> listener=pan(position=.7*azimuth) -> world.mix
+  bodyMix -> gain(level=.3) -> world.room
+  sine(hz=27) -> depth=gain(level=0) -> rough:level
+  sine(hz=33) -> pan(position=-.6) -> floor=gain(level=0) -> shape(drive=2.2) -> gain(level=.3) -> bodyMix
+  sine(hz=35.2) -> pan(position=.6) -> floor
+
+  noise(buffer=brown,offset=rand(0,2.5)) -> lowpass(cutoffHz=200,q=.9) -> chop=gain() -> roar=gain(level=0) -> body
+  turn=sine(hz=3.2) -> gain(level=.35) -> chop:level
+  sine(hz=13.5) -> gain(level=.2) -> chop:level
+  noise(buffer=pink,offset=rand(0,2.5)) -> bandpass(cutoffHz=520,q=.7) -> mid=gain(level=0) -> around=pan(position=0) -> body
+  sine(hz=1.6) -> gain(level=.9) -> around:position
+  noise(buffer=white,offset=rand(0,2.5)) -> highpass(cutoffHz=3500) -> hiss=gain(level=0) -> swirl=pan(position=0) -> body
+  sine(hz=2.3) -> gain(level=-.9) -> swirl:position
+  noise(buffer=pink,offset=rand(0,2.5)) -> whistleInput=gain(level=5)
+  howl=gain(level=0) -> bodyMix
+  howl -> gain(level=1.2) -> world.room
+}
+bus whistleFeeds {
+  tornado.whistleInput -> whistle.0.gap
+  tornado.whistleInput -> whistle.1.gap
+  tornado.whistleInput -> whistle.2.gap
+}
+voice whistle(root=[392,587.3,784]) {
+  gap=bandpass(cutoffHz=root,q=14) -> tornado.howl
+  sine(hz=.21+.13*i) -> gain(level=.05*root) -> gap:cutoffHz
+}
+voice approach {
+  noise(buffer=pink,offset=rand(0,2.5),life=1.15) -> bandpass(cutoffHz=exp(0,300,.9,2600),q=1.2) -> gain(level=swell(1.1,.5*(.4+.6*audible),1.6)) -> air=pan(position=.6*azimuth) -> world.mix
+  air -> gain(level=.3) -> world.room
+}
+voice seal[3] {
+  noise(buffer=white,offset=rand(0,2.5),life=span+.05) -> gap=bandpass(cutoffHz=exp(0,500*sway,.55*span,3800*sway,span,1500*sway),q=1.1) -> swell=gain(level=swell(span,.9,.8)) -> bus=gain(level=ringSize) -> air=pan(position=line(0,-.75,span,.75)) -> world.mix
+  gap -> delay.linear(delaySeconds=line(0,.006,.6*span,.0012,span,.004)) -> swell
+  noise(buffer=white,offset=rand(0,2.5),life=span+.1) -> highpass(cutoffHz=6000) -> gain(level=swell(span,.3,.7,.04)) -> bus
+  sine(hz=exp(0,52,span,74),life=span*1.2+.02) -> gain(level=swell(span*1.2,.25,.9)) -> bus
+  air -> gain(level=.6) -> world.room
+}
+voice embers[16] {
+  source.grain_once(buffer=emberWhite,decaySeconds=.006,playbackRate=rand(.4,1.3),life=.1) -> bandpass(cutoffHz=rand(900,3400),q=1.5) -> gain(level=rand(.2,.7)*fire*close) -> pan(position=azimuth+rand(-.5,.5)) -> world.mix
+}
+voice ice[8] {
+  source.grain_once(buffer=emberWhite,decaySeconds=.006,playbackRate=rand(2,4),life=.022) -> highpass(cutoffHz=5000) -> gain(level=.3*frost*close) -> pan(position=azimuth+rand(-.5,.5)) -> world.mix
+}
+voice rumble[32] {
+  noise(buffer=brown,offset=rand(0,2.5),life=2.3) -> lowpass(cutoffHz=220) -> gain(level=exp(0,.0001,.08,.3*(.3+.7*audible),2.2,.0001)) -> echo=pan(position=callPan) -> world.mix
+  echo -> gain(level=.3) -> world.room
+}
+bus strike {
+  clap=gain(level=.35+.65*max(0,1-distance/110)) -> filter.lowshelf(cutoffHz=120,gainDb=9) -> dry=pan(position=.5*azimuth) -> world.mix
+  dry -> gain(level=.35) -> world.room
+  dry -> gain(level=.7) -> world.hills
+  ground=gain(level=.35+.65*max(0,1-distance/110)) -> filter.lowshelf(cutoffHz=120,gainDb=9) -> world.mix
+}
+voice under {
+  sine(hz=30,life=4.1) -> pan(position=-.7) -> low=gain(level=exp(0,.0001,.015,1.2,4,.0001)) -> shape(drive=2.4) -> strike.clap
+  sine(hz=32.6,life=4.1) -> pan(position=.7) -> low
+}
+voice clap[3] {
+  noise(buffer=white,offset=rand(0,2.5),life=length+.02) -> highpass(cutoffHz=cutoff) -> gain(level=exp(0,impact,length,.0001)) -> strike.clap
+}
+voice static[16] {
+  source.grain_once(buffer=emberWhite,decaySeconds=.006,playbackRate=rand(.5,1.7),life=.08) -> bandpass(cutoffHz=rand(900,2500),q=.8) -> gain(level=.5*amount*rand(.3,1)) -> pan(position=rand(-.8,.8)) -> world.mix
+}
+patch weight {
+  noise(buffer=brown,offset=rand(0,2.5),life=hitDuration+.05) -> lowpass(cutoffHz=exp(0,260,hitDuration*.6,55),q=.8) -> gain(level=exp(0,.0001,.006,weightLevel,hitDuration,.0001)) -> shape(drive=3) -> outlet
+}
+voice impactWeight -> strike.clap { use weight(weightLevel=1.6,hitDuration=1.6) }
+voice groundWeight -> strike.ground { use weight(weightLevel=1.5,hitDuration=1.4) }
+voice thunder {
+  noise(buffer=pink,offset=rand(0,2.5),life=3.6) -> lowpass(cutoffHz=exp(0,3000,2.5,120),q=.6) -> gain(level=exp(0,1.1,3.5,.0001)) -> strike.clap
+}
+output world.out

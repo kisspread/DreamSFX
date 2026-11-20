@@ -1,0 +1,10 @@
+sound benchmark.oneshot_explosion
+preview .001 s
+tail 1.2 s
+input brightnessHz range 100 24000 default 24000
+voice blast {
+  burst=source.sfxr(wave=noise,kernelRateHz=44100,sampleBits=16,seed=1337,gainDb=-14,voiceLimit=1,attack=0,sustain=.17,punch=.5,decay=.4,baseFrequency=.45,frequencySlide=-.28,pulseWidth=.15,lowpassCutoff=.55,lowpassResonance=.1,outputLevel=.4) -> tone=filter.one_pole_lowpass(cutoffHz=brightnessHz)
+}
+start { play blast }
+fire blast.burst at 0 velocity 1
+output blast.tone

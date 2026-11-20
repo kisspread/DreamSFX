@@ -1,0 +1,2 @@
+instance dwarf.clicktick of dwarf.clickthud
+kind = 4

@@ -1,0 +1,2 @@
+instance duskward.crickets of duskward.tour
+solo = 6

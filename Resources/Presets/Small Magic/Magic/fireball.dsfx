@@ -1,0 +1,77 @@
+sound small_magic.fireball
+preview 7 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  roomIR=impulse.room(3.2s)
+  white=buffer.white(3s)
+  pink=buffer.pink(3s)
+  brown=buffer.brown(3s)
+  emberWhite=buffer.white(.04s,channels=1)
+  skip extraRoomAndHiss=182400
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  room=room(ir=roomIR) -> gain(level=.8) -> mix
+  hills=echo(seconds=.71) -> ridge=lowpass(cutoffHz=1250,q=.5) -> gain(level=.85) -> mix
+  ridge -> gain(level=.34) -> delay(seconds=128/48000) -> hills
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+
+input charge range 0 1 default .9
+input size range 0 1 default .85
+input distance range 0 100 default 20.591260281974
+input side range -1 1 default .147606099035
+input impactOnWet range 0 1 default 0
+audition { at .3 launch; at .55 land }
+memory { arrived=0; level=1; scatter=1; dustHz=1000; dustLevel=.15; dustPan=0 }
+state idle {}
+state launch { enter throw }
+state land { enter strike }
+rule throw { play flameWhoosh; play kick }
+rule strike {
+  arrived=now+min(distance/343,.12)
+  level=(.35+.65*max(0,1-distance/110))*(.55+.45*size)
+  world.pre:level=line(0,.5,.004,.5+.3*size,.4,.5+.3*size,1.5,.5) at arrived
+  play crack at arrived; play strikeWeight at arrived; play burn at arrived
+  repeat 24 then spark
+  if impactOnWet>.5 then steam
+}
+rule spark {
+  scatter=rand(.35,1.15); dustHz=rand(900,3100); dustLevel=rand(.15,.55)*level; dustPan=side+rand(-.5,.5)
+  play ember at arrived+.1+1.6*rand(0,1)^1.5
+}
+rule steam { play vapour at arrived }
+bus landing {
+  in=gain(level=(.35+.65*max(0,1-distance/110))*(.55+.45*size)) -> filter.lowshelf(cutoffHz=120,gainDb=7) -> p=pan(position=.6*side) -> world.mix
+  p -> gain(level=.3) -> world.room
+  p -> gain(level=.4) -> world.hills
+}
+patch weight {
+  noise(buffer=brown,offset=rand(0,2.5),life=duration+.05) -> lowpass(cutoffHz=exp(0,260,duration*.6,55),q=.8) -> gain(level=exp(0,.0001,.006,weightLevel,duration,.0001)) -> shape(drive=3) -> outlet
+}
+voice kick -> world.mix { use weight(weightLevel=.35+.7*charge,duration=.5) }
+voice strikeWeight -> landing.in { use weight(weightLevel=.8+.5*size,duration=.9) }
+voice flameWhoosh {
+  noise(buffer=pink,offset=rand(0,2.5),life=.7) -> bandpass(cutoffHz=exp(0,1800,.5,260),q=.9) -> level=gain(level=exp(0,.0001,.03,.5+.5*charge,.65,.0001)) -> world.mix
+  level -> gain(level=.25) -> world.room
+}
+voice crack {
+  noise(buffer=white,offset=rand(0,2.5),life=.1) -> highpass(cutoffHz=800) -> gain(level=exp(0,.9,.09,.0001)) -> landing.in
+}
+voice burn {
+  noise(buffer=pink,offset=rand(0,2.5),life=1.7) -> lowpass(cutoffHz=exp(0,2600,1.2,160),q=.6) -> gain(level=exp(0,1,1.6,.0001)) -> landing.in
+}
+voice ember[24] {
+  source.grain_once(buffer=emberWhite,decaySeconds=.006,playbackRate=scatter,life=.115) -> bandpass(cutoffHz=dustHz,q=1.5) -> gain(level=dustLevel) -> pan(position=dustPan) -> world.mix
+}
+voice vapour {
+  noise(buffer=white,offset=rand(0,2.5),life=1.5) -> highpass(cutoffHz=2200) -> gain(level=swell(1.4,.5*level,.5)) -> p=pan(position=side) -> world.mix
+  p -> gain(level=.3) -> world.room
+}
+output world.out

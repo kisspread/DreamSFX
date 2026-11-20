@@ -1,0 +1,19 @@
+{
+  "schema": "dreamsfx/2",
+  "id": "benchmark.sine_confirm_soft",
+  "seed": 1394,
+  "durationSeconds": 0.125,
+  "voiceTailSeconds": 0.09,
+  "resources": [],
+  "nodes": [
+    {"id":"chime", "type":"voice.sine", "version":1, "parameters":{"gainDb":-26, "voiceLimit":4}}
+  ],
+  "connections": [],
+  "timeline": [
+    {"atSeconds":0, "action":"noteOn", "target":{"node":"chime", "port":"noteOn"}, "noteId":"c5", "midi":72, "velocity":0.7},
+    {"atSeconds":0.029166666666666667, "action":"noteOff", "target":{"node":"chime", "port":"noteOff"}, "noteId":"c5"},
+    {"atSeconds":0.041666666666666664, "action":"noteOn", "target":{"node":"chime", "port":"noteOn"}, "noteId":"g5", "midi":79, "velocity":0.7},
+    {"atSeconds":0.1, "action":"noteOff", "target":{"node":"chime", "port":"noteOff"}, "noteId":"g5"}
+  ],
+  "output": {"node":"chime", "port":"audio"}
+}

@@ -1,0 +1,2 @@
+instance duskward.daypad of duskward.tour
+solo = 7

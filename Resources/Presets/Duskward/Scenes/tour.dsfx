@@ -1,0 +1,147 @@
+sound duskward.tour
+# 巡游同时打开十层。图以世界 z 坐标计算昼暮，速度和地形因子可由宿主实时给出。
+preview 60 s
+clock 10 Hz
+seed 690030787 mulberry32
+input solo range 0 10 default 0
+input gainDb range -60 6 default 0
+input worldZ range -250 250 default -214
+input airSpeed range 0 80 default 10
+input ground range 0 1 default .85
+input wetGround range 0 1 default 0
+input foliage range 0 1 default 0
+input aqueduct range 0 1 default 0
+
+audition {
+  worldZ=-214+448*time/60
+  airSpeed=9.34+4.8*sin(pi*time/60)
+  wetGround=clamp((worldZ+190)/280,0,1)
+}
+resources {
+  sky=buffer.three_pole_loop(9s,random=mulberry32,crossfadeFrames=4096,slowPole=.997,slowInput=.029,midPole=.985,midInput=.032,fastPole=.95,fastInput=.048,direct=.02,level=1.6)
+  space=impulse.diffuse(4s,random=mulberry32,dampingFloor=.05,dampingAmount=.6,dampingDecayPerSecond=2.5,attackSeconds=.025,decaySeconds=.5882352941176471,taperEnd=0)
+}
+
+bus field {
+  let layer=floor(solo+.5)
+  master=gain(level=target(0,.75*pow(10,gainDb/20),1)) -> out=compressor(thresholdDb=-8,kneeDb=6,ratio=16,attackSeconds=.004,releaseSeconds=.25)
+  wet=room.convolution(ir=space) -> gain(level=.9) -> master
+  hum=gain(level=if(layer==0,1,layer==1)) -> master
+  wind=gain(level=if(layer==0,1,layer==2)) -> master
+  leaves=gain(level=if(layer==0,1,layer==3)) -> master
+  water=gain(level=if(layer==0,1,layer==4)) -> master
+  rush=gain(level=if(layer==0,1,layer==5)) -> master
+  crickets=gain(level=if(layer==0,1,layer==6)) -> master
+  day=gain(level=if(layer==0,1,layer==7)) -> master
+  dusk=gain(level=if(layer==0,1,layer==8)) -> master
+  bubbles=gain(level=if(layer==0,1,layer==9)) -> master
+  chimes=gain(level=if(layer==0,1,layer==10)) -> master
+  leaves -> gain(level=.35) -> wet
+  water -> gain(level=.5) -> wet
+  crickets -> gain(level=.25) -> wet
+  day -> gain(level=1.4) -> wet
+  dusk -> gain(level=1.4) -> wet
+  bubbles -> gain(level=.35) -> wet
+  chimes -> gain(level=1.2) -> wet
+}
+
+bus environment {
+  sine(hz=43.6) -> hum=gain(level=.05) -> field.hum
+  triangle(hz=87.3) -> gain(level=.25) -> hum
+  mod.sine(frequencyHz=.11,amplitude=.015,offset=0) -> hum:level
+
+  noise(buffer=sky,playbackRate=.5) -> lowpass(cutoffHz=380,q=.6) -> breeze=gain(level=.2) -> field.wind
+  mod.sine(frequencyHz=.05,amplitude=.07,offset=0) -> breeze:level
+  mod.sine(frequencyHz=.083,amplitude=.05,offset=0) -> breeze:level
+
+  noise(buffer=sky,playbackRate=1.3) -> highpass(cutoffHz=2600,q=.5) -> rustle=gain(level=.5) -> leaves=gain(level=0) -> field.leaves
+  mod.sine(frequencyHz=.05,amplitude=.4,offset=0) -> rustle:level
+
+  noise(buffer=sky,playbackRate=.8) -> stream=bandpass(cutoffHz=900,q=1.4) -> water=gain(level=0) -> field.water
+  mod.sine(frequencyHz=3.1,amplitude=260,offset=0) -> stream:cutoffHz
+  mod.sine(frequencyHz=1.7,amplitude=180,offset=0) -> stream:cutoffHz
+  mod.sine(frequencyHz=.43,amplitude=120,offset=0) -> stream:cutoffHz
+
+  noise(buffer=sky,playbackRate=.7) -> air=bandpass(cutoffHz=300,q=.8) -> rush=gain(level=0) -> field.rush
+}
+
+patch padPair {
+  sine(hz=base) -> pair=gain(level=volume/(1+i*.4)) -> outlet
+  sine(hz=detuned) -> pair
+  mod.sine(frequencyHz=sway,amplitude=volume*.3,offset=0) -> pair:level
+}
+bus fades {
+  day=gain(level=0) -> field.day
+  dusk=gain(level=0) -> field.dusk
+  insects=gain(level=0) -> field.crickets
+}
+voice dayPair(base=[146.83,220,293.66,369.99,329.63]) -> fades.day {
+  let detuned=base*1.0012+rand(.02,.08)
+  let sway=rand(.03,.09)
+  use padPair(volume=.016)
+}
+voice duskPair(base=[123.47,185,220,277.18,293.66]) -> fades.dusk {
+  let detuned=base*1.0012+rand(.02,.08)
+  let sway=rand(.03,.09)
+  use padPair(volume=.018)
+}
+
+voice insect(carrier=[4520,4890,4210]) {
+  sine(hz=carrier) -> gain(level=.05) -> quick=gain(level=.5) -> slow=gain(level=.5) -> pan(position=pick(i,-.6,.1,.7)) -> fades.insects
+  square(hz=pick(i,29,33,26)) -> gain(level=.5) -> quick:level
+  square(hz=pick(i,2.1,2.6,1.7)) -> gain(level=.5) -> slow:level
+}
+voice bubble[4] { tone=sine(hz=440) -> envelope=gain(level=0) -> azimuth=pan(position=0) -> field.bubbles }
+voice chime[3] { tone=sine(hz=440) -> envelope=gain(level=0) -> azimuth=pan(position=0) -> field.chimes }
+
+memory {
+  twilight=0; dark=0; insects=0; farNorth=0; farSouth=0
+  nextBubble=2; nextChime=9; atNote=0; bubbleSlot=0; chimeSlot=0
+  baseHz=0; endHz=0; length=0; loudness=0
+  sampledNatureTimers=0
+}
+# 本体初始化时为三组采样自然声计时器各取一次随机数。
+start { all dayPair; all duskPair; all insect; all bubble; all chime; sampledNatureTimers=rand(2,6)+rand(3,8)+rand(12,30) }
+state idle { tick step }
+rule step { if time>0 then update }
+rule update {
+  twilight=clamp((worldZ+200)/428,0,1)
+  dark=twilight^2*(3-2*twilight)
+  insects=clamp((dark-.45)/.4,0,1)
+  farNorth=clamp((worldZ-150)/86,0,1)
+  farSouth=clamp((-worldZ-150)/86,0,1)
+  environment.hum:level=target(.035+.06*max(farNorth^2*(3-2*farNorth),farSouth^2*(3-2*farSouth)),1) at now+.05
+  environment.leaves:level=target((.03+.2*foliage)*ground*(1-.6*dark),.5) at now+.05
+  environment.water:level=target(.16*max(wetGround*ground,aqueduct),.5) at now+.05
+  environment.rush:level=target(.45*min(airSpeed/30,1)^1.2,.3) at now+.05
+  environment.air:cutoffHz=target(220+14*airSpeed,.3) at now+.05
+  fades.day:level=target(1-dark,1.5) at now+.05
+  fades.dusk:level=target(dark,1.5) at now+.05
+  fades.insects:level=target(.5*insects^2*(3-2*insects)*ground,1) at now+.05
+  if now+.05>nextBubble then bubbleBurst
+  if now+.05>nextChime then ring
+}
+rule bubbleBurst {
+  atNote=now+.05; repeat floor(3+rand(0,5)) then bubbleNote
+  nextBubble=atNote+rand(.6,4)/max(.08,1-dark)
+}
+rule bubbleNote {
+  baseHz=rand(2200,5200); endHz=baseHz*rand(.7,1.45)
+  length=rand(.05,.14); loudness=rand(.012,.03)*ground
+  bubble[bubbleSlot].azimuth:position=rand(-.8,.8) at atNote
+  bubble[bubbleSlot].tone:hz=exactexp(0,baseHz,length,endHz) at atNote
+  bubble[bubbleSlot].envelope:level=line(0,0,.008,loudness) at atNote
+  bubble[bubbleSlot].envelope:level=target(0,(length-.008)/4) at atNote+.008
+  bubbleSlot=wrap(bubbleSlot+1,4); atNote=atNote+rand(.07,.18)
+}
+rule ring {
+  atNote=now+.05
+  baseHz=554.37*2^(pick(floor(rand(0,9)),0,2,4,7,9,12,14,16,19)/12)
+  loudness=rand(.012,.026)*(.3+dark)
+  chime[chimeSlot].azimuth:position=rand(-.8,.8) at atNote
+  chime[chimeSlot].tone:hz=exactexp(0,baseHz,4.5,baseHz) at atNote
+  chime[chimeSlot].envelope:level=line(0,0,.02,loudness) at atNote
+  chime[chimeSlot].envelope:level=target(0,1.12) at atNote+.02
+  chimeSlot=wrap(chimeSlot+1,3); nextChime=atNote+rand(4,12)
+}
+output field.out

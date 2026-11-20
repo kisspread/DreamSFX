@@ -1,0 +1,109 @@
+sound dwarf.gearmesh
+# 同一台齿轮。kind 0 啮合、1 滚动、2 远景；speed 是齿率倍率。
+clock 100 Hz
+preview 24 s
+seed 20261120
+input kind range 0 2 default 0
+input speed range .5 2 default 1
+audition { at 0 turning; at 16 settle }
+resources {
+  hall=impulse.diffuse(3.5s,random=lcg32,dampingFloor=.03,dampingAmount=.4,dampingDecayPerSecond=1.2,attackSeconds=.025,decaySeconds=.9523809523809524,taperEnd=1)
+  brown=buffer.brown_loop(4s,random=lcg32,crossfadeFrames=0,step=.02,level=3.4)
+  white=buffer.white(4s)
+}
+bus room {
+  dry=compressor(thresholdDb=-10,kneeDb=6,ratio=8,attackSeconds=.004,releaseSeconds=.25) -> shape(drive=1.4,oversample2x=1) -> out=gain(level=.8)
+  send=room.convolution@2(ir=hall,normalize=0) -> gain(level=.55) -> dry
+}
+memory {
+  model=0; nextTooth=.5; tooth=0; poll=1; atHit=0; heavy=0; impact=1; strikePan=0
+  rootHz=96; ringLevel=.22; sendLevel=.5; cut=0; weight=1; part=0; parts=5
+  d0=2.2; d1=1.4; d2=.9; d3=.9; d4=.9
+  fromHz=70; toHz=36; length=.5; thudLevel=.7
+  chipAt=0; chipLife=0; chipCut=0; chipPan=0
+}
+state idle {}
+state turning { enter startGear; tick turn }
+state settle { enter stopGear }
+rule startGear {
+  model=(kind>=.5)+(kind>=1.5)
+  tooth=0; poll=1; nextTooth=now+.5; atHit=now
+  fromHz=70; toHz=36; length=.5; thudLevel=.7; play thud
+  rootHz=96; ringLevel=.22; sendLevel=.5; cut=0; weight=1; strikePan=0
+  d0=2.2; d1=1.4; d2=.9; d3=.9; d4=.9; parts=5; call ring
+  play axle; if model==0 then startBearing
+}
+rule startBearing { play bearing }
+rule turn { if time>=poll*7/100 then lookAhead }
+rule lookAhead {
+  poll=poll+1
+  if nextTooth<now+.2 then strike
+  axle.loop:playbackRate=target(.55+.35*speed,.3)
+  axle.pressure:level=target(if(model==2,.22+.15*speed,.35+.3*speed),.4)
+  bearing.level:level=target(.006+.016*max(0,speed-.9),.5)
+}
+rule strike {
+  atHit=nextTooth; heavy=if(wrap(tooth,14)==0,1,0)
+  impact=if(heavy,1.35,.8)*if(model==2,.45,1)
+  strikePan=rand(-.5,.5)*if(model==1,.7,.35); play bite at atHit
+  fromHz=if(model==0,82,68); toHz=40; length=.34; thudLevel=.5*impact; play thud at atHit
+  rootHz=if(model==0,132,88); ringLevel=if(model==0,.2,.13)*impact*if(heavy,1.3,1)
+  cut=pick(model,0,1300,420); sendLevel=if(model==2,.7,.4); weight=1.15
+  if heavy==0 then lighterHit
+  parts=if(model==1,3,5); d0=if(model==2,2.6,1.5); d1=if(model==2,1.7,.95)
+  d2=if(model==2,1.1,.62); d3=if(model==2,1.1,.4); d4=if(model==2,1.1,.26)
+  call ring; tooth=tooth+1
+  if model==1 then rollStep
+  if model==0 then evenStep
+  if model==2 then evenStep
+}
+rule lighterHit { weight=rand(.8,1.1) }
+rule evenStep { nextTooth=nextTooth+1/(1.05*speed) }
+rule rollStep {
+  if rand(0,1)<.2 then chipOff
+  nextTooth=nextTooth+rand(.92,1.08)/(1.05*speed)
+}
+rule chipOff {
+  chipAt=atHit+.05+.1*rand(0,1); chipLife=rand(.03,.07); chipCut=rand(900,2500)
+  chipPan=strikePan+rand(-.5,.5); play chip at chipAt
+}
+rule ring { part=0; repeat parts then excite }
+rule excite { play mode at atHit; part=part+1 }
+rule stopGear {
+  axle.pressure:level=target(0,.25); bearing.level:level=target(0,.25)
+  stop axle after 1.2; stop bearing after 1.2
+  atHit=now+.5; fromHz=60; toHz=34; length=.6; thudLevel=.5; play thud at atHit
+  rootHz=90; ringLevel=.16; sendLevel=.5; cut=0; strikePan=0; weight=1; parts=5
+  d0=2; d1=1.3; d2=.8; d3=.8; d4=.8; call ring
+}
+voice axle {
+  loop=noise@2(buffer=brown,playbackRate=.7,rateHoldFrames=128) -> lowpass(cutoffHz=105,q=.6) -> pressure=gain(level=exp(0,.0001,1.4,if(model==2,.3,.5))) -> room.dry
+  sine(hz=.7) -> gain(level=.12) -> pressure:level
+  sine(hz=2.3) -> gain(level=.06) -> pressure:level
+}
+voice bearing {
+  noise(buffer=white) -> band=bandpass(cutoffHz=1850,q=14) -> level=gain(level=.012) -> pan(position=-.4) -> room.dry
+  sine(hz=.23) -> gain(level=340) -> band:cutoffHz
+  sine(hz=.31) -> gain(level=.006) -> level:level
+}
+voice bite[3] {
+  noise(buffer=white,offset=rand(0,2),life=.034) -> bandpass(cutoffHz=2400,q=1.2) -> edge=gain(level=exp(0,.16*impact,.014,.0005)) -> pan(position=strikePan) -> room.dry
+  edge -> gain(level=if(model==2,.5,.18)) -> room.send
+}
+voice chip[3] {
+  noise(buffer=white,offset=rand(0,2),life=chipLife+.02) -> lowpass(cutoffHz=chipCut,q=1) -> gain(level=exp(0,.05*impact,chipLife,.0005)) -> pan(position=chipPan) -> room.dry
+}
+voice thud[4] {
+  sine(hz=exp(0,fromHz,length*.8,toHz),life=length+.03) -> gain(level=line(0,.0001,.006,thudLevel)) -> gain(level=exp(0,1,.006,1,length,.0006/thudLevel)) -> shape(drive=2.4) -> room.dry
+}
+voice mode[40] {
+  let hz0=rootHz*pick(part,1,1.71,2.53,3.29,4.12)*rand(.994,1.006)
+  let hz1=hz0*rand(.999,1.001)
+  let decay=pick(part,d0,d1,d2,d3,d4)*rand(.8,1.2)
+  let peak=pick(part,1,.55,.35,.22,.12)*weight
+  sine(hz=target(hz0,hz1,.5),life=decay+.05) -> gain(level=line(0,.0001,.004,peak)) -> gain(level=exp(0,1,.004,1,decay,.0006/peak)) -> body=gain(level=ringLevel)
+  body -> gain(level=if(cut==0,1,0)) -> side=pan(position=strikePan) -> room.dry
+  body -> lowpass(cutoffHz=max(100,cut),q=.5) -> gain(level=if(cut>0,1,0)) -> side
+  side -> gain(level=sendLevel) -> room.send
+}
+output room.out

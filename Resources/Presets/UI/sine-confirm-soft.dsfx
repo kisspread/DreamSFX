@@ -1,0 +1,10 @@
+sound benchmark.sine_confirm_soft
+preview .125 s
+tail .09 s
+input transposeBy range -12 12 default 0
+patch bell { tone=voice.sine(gainDb=-26,voiceLimit=4) }
+track chime uses bell {
+  tempo 180; velocity .7; gate .7; transpose transposeBy
+  C5/32 G5/16
+}
+output chime.tone

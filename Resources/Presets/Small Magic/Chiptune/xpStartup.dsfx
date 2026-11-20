@@ -1,0 +1,57 @@
+sound small_magic.xpstartup
+preview 5.5 s
+clock 100 Hz
+seed 132721
+input volume range .05 1 default .8
+resources {
+  # 主场先生成房间、三色噪声和颗粒。两套总线共用这条随机序列。
+  skip roomAndWhite=595228
+  pink=buffer.pink(3s)
+  skip brownAndGrain=289920
+  reflections=buffer.white(.9s)
+  hiss=buffer.white(2s,channels=1)
+}
+bus world {
+  mix=gain() -> hush=gain() -> ears=lowpass(cutoffHz=20000,q=.5) -> pre=gain(level=.5) -> compressor(thresholdDb=-6,kneeDb=6,ratio=8,attackSeconds=.003,releaseSeconds=.3) -> shape(drive=1.5,normalized=1,oversample2x=1) -> out=gain(level=target(.9,.9*volume,.03))
+  beds=gain() -> mix
+  noise(buffer=pink,offset=rand(0,2.5)) -> wind=lowpass(cutoffHz=420,q=.6) -> breeze=gain(level=.04) -> beds
+  sine(hz=.07) -> gain(level=170) -> wind:cutoffHz
+  sine(hz=.11*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+  sine(hz=.23*rand(.9,1.1)) -> gain(level=.015) -> breeze:level
+}
+bus synth {
+  sum=gain()
+  input=gain(level=target(.8,.8*volume,.03)) -> compressor(thresholdDb=-10,kneeDb=4,ratio=4,attackSeconds=.003,releaseSeconds=.2) -> shape(drive=1.3,normalized=1) -> sum
+  room=room.decaying_noise(noise=reflections,attackSeconds=.004,decaySeconds=.14285714285714285) -> gain(level=.35) -> input
+  world.out -> sum
+}
+
+audition { at .3 cast }
+state idle {}
+state cast { enter launch }
+# 本地试听页的原创致敬段，以暖垫和木槌音色叠加。
+memory { note=0 }
+rule launch { padMix.env:level=exp(.6,.0001,2.2,.16,4.4,.0006); play veil; all pad at now+.6; play bass at now+.6; repeat 4 then strike }
+rule strike { play mallet at now+pick(note,1,1.18,1.36,1.6); note=note+1 }
+voice veil {
+  source.mono_noise_buffer(buffer=hiss,offset=rand(0,1.5),life=3.6) -> bandpass(cutoffHz=exp(0,800,3.2,5200),q=1.5) -> gain(level=exp(0,.0001,2.2,.05,3.5,.0001)) -> synth.input
+}
+bus padMix {
+  filter=lowpass(cutoffHz=1300,q=.5) -> env=gain(level=0) -> synth.input
+  env -> gain(level=.4) -> synth.room
+}
+voice pad(hz=[146.83,220,329.63,369.99]) {
+  saw(hz=hz,cents=-6,life=3.9) -> gain(level=.25) -> padMix.filter
+  saw(hz=hz,cents=6,life=3.9) -> gain(level=.25) -> padMix.filter
+}
+voice bass {
+  sine(hz=73.42,life=3.9) -> gain(level=exp(0,.0001,1.2,.06,3.8,.0006)) -> synth.input
+}
+voice mallet[4] {
+  let hz=pick(note,293.66,369.99,440,587.33)
+  sine(hz=hz,life=.62) -> body=gain(level=exp(0,.09,.6,.0006)) -> synth.input
+  sine(hz=hz*4,life=.14) -> ring=gain(level=exp(0,.0162,.12,.0006)) -> synth.input
+  body -> gain(level=.3) -> synth.room
+  ring -> gain(level=.3) -> synth.room
+}
+output synth.sum

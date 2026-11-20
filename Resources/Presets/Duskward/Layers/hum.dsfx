@@ -1,0 +1,2 @@
+instance duskward.hum of duskward.tour
+solo = 1
