@@ -20,7 +20,8 @@ class DREAMSFXRUNTIME_API UDreamSFXGraphAsset : public UObject, public IAudioPro
     GENERATED_BODY()
 
 public:
-    bool Initialize(DreamSFX::V2::FGraphPtr InGraph, bool bPersist);
+    bool Initialize(DreamSFX::V2::FGraphPtr InGraph, bool bPersist, int32 BuildVersion = 0);
+    bool MatchesBuild(const DreamSFX::V2::FGraphIR& Candidate, int32 BuildVersion) const;
     DreamSFX::V2::FGraphPtr GetGraph() const { return Graph; }
     void PostLoad() override;
     TSharedPtr<Audio::IProxyData> CreateProxyData(const Audio::FProxyDataInitParams&) override;
@@ -28,6 +29,9 @@ public:
 private:
     UPROPERTY()
     TArray<uint8> Payload;
+
+    UPROPERTY()
+    int32 SourceBuildVersion = 0;
 
     DreamSFX::V2::FGraphPtr Graph;
 };

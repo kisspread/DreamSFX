@@ -20,39 +20,80 @@ namespace
         return true;
     }
 
-    DreamSFX::V2::FGraphPtr CompileGraph(const FString& Text, FString& Error)
+    DreamSFX::V2::FGraphPtr CompileGraph(const FString& Text, const FString& Path, FString& Error,
+        FDreamSFXSourceDiagnostic* Diagnostic)
     {
         auto Result = DreamSFX::V2::FGraphCompiler::Compile(Text);
         if (!Result.Graph)
+        {
+            if (Diagnostic && !Result.Errors.IsEmpty())
+            {
+                const auto& Failure = Result.Errors[0];
+                *Diagnostic = {Path, Failure.Code, Failure.Message};
+                FString Line, Column;
+                if (Failure.Pointer.Split(TEXT(":"), &Line, &Column))
+                {
+                    LexTryParseString(Diagnostic->Line, *Line);
+                    LexTryParseString(Diagnostic->Column, *Column);
+                }
+            }
             for (const auto& Failure : Result.Errors)
                 Error += Failure.Code + TEXT(" ") + Failure.Pointer + TEXT(" ") + Failure.Message + TEXT("\n");
+        }
         return Result.Graph;
     }
 
-    TArray<FString> Statements(const FString& Text)
+    struct FInstanceStatement
     {
-        TArray<FString> Lines,Result;Text.ParseIntoArrayLines(Lines);
-        for(auto S:Lines)
+        FString Text;
+        int32 Line, Column;
+    };
+
+    TArray<FInstanceStatement> Statements(const FString& Text)
+    {
+        TArray<FString> Lines;
+        Text.ParseIntoArrayLines(Lines, false);
+        TArray<FInstanceStatement> Result;
+        for (int32 Index = 0; Index < Lines.Num(); ++Index)
         {
-            int32 Comment;if(S.FindChar('#',Comment))S.LeftInline(Comment);
-            S.TrimStartAndEndInline();if(!S.IsEmpty())Result.Add(MoveTemp(S));
+            FString& Line = Lines[Index];
+            int32 Comment;
+            if (Line.FindChar('#', Comment)) Line.LeftInline(Comment);
+            int32 Indent = 0;
+            while (Indent < Line.Len() && FChar::IsWhitespace(Line[Indent])) ++Indent;
+            if (Indent < Line.Len()) Result.Add({Line.Mid(Indent).TrimEnd(), Index + 1, Indent + 1});
         }
         return Result;
     }
-    bool Header(const FString& Text,FString& Id,FString& Parent)
+
+    bool Header(const FString& Text, FDreamSFXGraphTextEntry& Entry, int32& LineNumber)
     {
         TArray<FString> Words;
-        int32 Start=0;
-        while(Start<Text.Len())
+        for (int32 Start = 0; Start < Text.Len(); ++LineNumber)
         {
-            int32 End=Start;while(End<Text.Len()&&Text[End]!='\n')++End;
-            FString Line=Text.Mid(Start,End-Start);Start=End+1;
-            int32 Comment;if(Line.FindChar('#',Comment))Line.LeftInline(Comment);
-            Line.ParseIntoArrayWS(Words);if(!Words.IsEmpty())break;
+            int32 End = Start;
+            while (End < Text.Len() && Text[End] != '\n') ++End;
+            FString Line = Text.Mid(Start, End - Start);
+            int32 Comment;
+            if (Line.FindChar('#', Comment)) Line.LeftInline(Comment);
+            Line.ParseIntoArrayWS(Words);
+            if (!Words.IsEmpty())
+            {
+                const bool bDefinition = Words.Num() == 2 && Words[0] == TEXT("sound") && ValidId(Words[1]);
+                const bool bInstance = Words.Num() == 4 && Words[0] == TEXT("instance") &&
+                    Words[2] == TEXT("of") && ValidId(Words[1]) && ValidId(Words[3]);
+                if (!bDefinition && !bInstance) return false;
+                const int32 KeywordEnd = Line.Find(Words[0], ESearchCase::CaseSensitive) + Words[0].Len();
+                const int32 IdStart = Line.Find(Words[1], ESearchCase::CaseSensitive, ESearchDir::FromStart, KeywordEnd);
+                if (IdStart == INDEX_NONE) return false;
+                Entry.Id = Words[1];
+                Entry.Kind = bDefinition ? TEXT("definition") : TEXT("instance");
+                if (bInstance) Entry.ParentId = Words[3];
+                Entry.DeclarationIdOffset = Start + IdStart;
+                return true;
+            }
+            Start = End + 1;
         }
-        if(Words.Num()==2&&Words[0]==TEXT("sound")&&ValidId(Words[1])){Id=Words[1];Parent.Reset();return true;}
-        if(Words.Num()==4&&Words[0]==TEXT("instance")&&Words[2]==TEXT("of")&&ValidId(Words[1])&&ValidId(Words[3]))
-        {Id=Words[1];Parent=Words[3];return true;}
         return false;
     }
     FString InstanceText(const FString& Id,const FString& Mother,const TMap<FName,double>& Values)
@@ -80,7 +121,7 @@ namespace
     }
 }
 
-bool FDreamSFXLibrarySnapshot::Load(const FString& Folder)
+bool FDreamSFXLibrarySnapshot::Load(const FString& Folder, TArray<FDreamSFXSourceDiagnostic>* Diagnostics)
 {
     Root = FPaths::ConvertRelativePathToFull(Folder);
     FPaths::NormalizeDirectoryName(Root);
@@ -89,22 +130,48 @@ bool FDreamSFXLibrarySnapshot::Load(const FString& Folder)
     TArray<FString> Files;
     IFileManager::Get().FindFilesRecursive(Files, *Root, TEXT("*.dsfx"), true, false);
     Files.Sort();
-    TSet<FString> Ids;
+    TMap<FString, int32> Ids;
+    TSet<FString> DuplicateIds;
+    const auto Report = [&](const FString& Path, const TCHAR* Code, const FString& Message, int32 Line, int32 Column)
+    {
+        if (Error.IsEmpty()) Error = Path + TEXT(": ") + Message;
+        if (Diagnostics) Diagnostics->Add({Path, Code, Message, Line, Column});
+    };
     for (const FString& Path : Files)
     {
-        FString Text;
-        if (!FFileHelper::LoadFileToString(Text, *Path))
+        FDreamSFXGraphTextEntry Entry;
+        Entry.Path = Path;
+        if (!FFileHelper::LoadFileToString(Entry.Text, *Path))
         {
-            Error = TEXT("Cannot read ") + Path;
-            return false;
+            Report(Path, TEXT("DSFX220"), TEXT("Cannot read sound text"), 0, 0);
+            if (!Diagnostics) return false;
+            continue;
         }
-        FString Id, Parent;
-        if(!Header(Text,Id,Parent)||Ids.Contains(Id)){Error=Path+TEXT(":1:1: expected a unique sound or instance declaration");return false;}
-        const bool bInstance=!Parent.IsEmpty();
-        Ids.Add(Id);
-        Entries.Add({Id, bInstance ? TEXT("instance") : TEXT("definition"), Path, MoveTemp(Text), Parent, {}});
+        int32 Line = 1;
+        if (!Header(Entry.Text, Entry, Line))
+        {
+            Report(Path, TEXT("DSFX221"), TEXT("Expected a sound or instance declaration"), Line, 1);
+            if (!Diagnostics) return false;
+            continue;
+        }
+        if (const int32* Previous = Ids.Find(Entry.Id))
+        {
+            const FString Message = TEXT("Duplicate sound ID: ") + Entry.Id;
+            Report(Path, TEXT("DSFX222"), Message, Line, 1);
+            if (!Diagnostics) return false;
+            if (!DuplicateIds.Contains(Entry.Id))
+            {
+                Report(Entries[*Previous].Path, TEXT("DSFX222"), Message, 0, 0);
+                DuplicateIds.Add(Entry.Id);
+            }
+            continue;
+        }
+        Ids.Add(Entry.Id, Entries.Num());
+        Entries.Add(MoveTemp(Entry));
     }
-    return true;
+    if (!DuplicateIds.IsEmpty())
+        Entries.RemoveAll([&](const FDreamSFXGraphTextEntry& Entry) { return DuplicateIds.Contains(Entry.Id); });
+    return Error.IsEmpty();
 }
 
 const FDreamSFXGraphTextEntry* FDreamSFXLibrarySnapshot::Find(const FString& Id) const
@@ -147,7 +214,7 @@ bool FDreamSFXSoundDocument::Load(const FString& Root, const FString& Id, FStrin
 }
 
 bool FDreamSFXSoundDocument::LoadFromSnapshot(FSnapshot Snapshot, const FString& Id, FString& Error,
-    const FString& DraftText, const FString& Baseline)
+    const FString& DraftText, const FString& Baseline, FDreamSFXSourceDiagnostic* Diagnostic)
 {
     const auto* Entry = Snapshot ? Snapshot->Find(Id) : nullptr;
     if (!Entry) { Error = TEXT("Sound not found: ") + Id; return false; }
@@ -159,38 +226,53 @@ bool FDreamSFXSoundDocument::LoadFromSnapshot(FSnapshot Snapshot, const FString&
     Next.LoadedText = Entry->Text;
     Next.Draft = DraftText;
     Next.MotherId = Entry->ParentId;
+    const auto Fail = [&](const TCHAR* Code, const FString& Message, int32 Line = 0, int32 Column = 0)
+    {
+        Error = Message;
+        if (Diagnostic) *Diagnostic = {Entry->Path, Code, Message, Line, Column};
+        return false;
+    };
     if (Next.IsInstance())
     {
         const auto* Mother = Snapshot->Find(Entry->ParentId);
-        if (!Mother || !Mother->ParentId.IsEmpty()) { Error = TEXT("Instance requires a V2 graph in this library"); return false; }
-        auto Parent = CompileGraph(Mother->Text, Error);
+        if (!Mother || !Mother->ParentId.IsEmpty())
+            return Fail(TEXT("DSFX223"), TEXT("Instance requires a sound definition in this library: ") + Entry->ParentId);
+        auto Parent = CompileGraph(Mother->Text, Mother->Path, Error, Diagnostic);
         if (!Parent) return false;
         const auto Lines=Statements(DraftText.IsEmpty()?Entry->Text:DraftText);
         FString Resolved=Mother->Text;
-        const int32 NameAt=Resolved.Find(TEXT("sound ")+Mother->Id);
-        if(NameAt==INDEX_NONE){Error=TEXT("Missing mother sound declaration");return false;}
-        Resolved.RemoveAt(NameAt+6,Mother->Id.Len());Resolved.InsertAt(NameAt+6,Id);
+        const int32 NameAt = Mother->DeclarationIdOffset;
+        if (NameAt == INDEX_NONE || !Resolved.Mid(NameAt, Mother->Id.Len()).Equals(Mother->Id, ESearchCase::CaseSensitive))
+            return Fail(TEXT("DSFX224"), TEXT("Cannot locate the mother sound ID"));
+        Resolved.RemoveAt(NameAt, Mother->Id.Len());
+        Resolved.InsertAt(NameAt, Id);
         for(const auto& In:Parent->Inputs)
             Next.Controls.Add({In.Name,TEXT("default"),In.Name.ToString(),In.Name.ToString(),TEXT(""),In.Minimum,In.Maximum,In.Default,false});
         for(int32 I=1;I<Lines.Num();++I)
         {
-            FString K,V;if(!Lines[I].Split(TEXT("="),&K,&V)){Error=TEXT("Expected input = value");return false;}
+            const auto& Statement = Lines[I];
+            FString K,V;
+            if (!Statement.Text.Split(TEXT("="), &K, &V))
+                return Fail(TEXT("DSFX225"), TEXT("Expected input = value"), Statement.Line, Statement.Column);
             K.TrimStartAndEndInline();V.TrimStartAndEndInline();const FName Key(K);
             const auto* In=Parent->Inputs.FindByPredicate([&](const auto& P){return P.Name==Key;});
             double Value=0;
             if(!In||!LexTryParseString(Value,*V)||!FMath::IsFinite(Value)||!FMath::IsWithinInclusive(Value,In->Minimum,In->Maximum)||Next.Instance.Contains(Key))
-            {Error=FString::Printf(TEXT("Instance line %d: expected one declared input and a value inside its range"),I+1);return false;}
+                return Fail(TEXT("DSFX225"), TEXT("Expected one declared input and a value inside its range: ") + K,
+                    Statement.Line, Statement.Column);
             Next.Instance.Add(Key,Value);Resolved+=FString::Printf(TEXT("\nbind %s = %.17g\n"),*K,Value);
         }
-        Next.Graph=CompileGraph(Resolved,Error);
+        Next.Graph=CompileGraph(Resolved, Mother->Path, Error, Diagnostic);
         Next.CacheKey = Mother->Text + Resolved;
     }
     else
     {
-        Next.Graph = CompileGraph(Entry->Text, Error);
+        Next.Graph = CompileGraph(Entry->Text, Entry->Path, Error, Diagnostic);
         Next.CacheKey = Entry->Text;
     }
     if (!Next.Graph) return false;
+    if (Next.Graph->Id != FName(*Id))
+        return Fail(TEXT("DSFX224"), TEXT("Compiled sound ID differs from the source declaration"));
     FTCHARToUTF8 Bytes(*Next.CacheKey);
     Next.CacheKey = FMD5::HashBytes(reinterpret_cast<const uint8*>(Bytes.Get()), Bytes.Length());
     *this = MoveTemp(Next);
@@ -260,9 +342,11 @@ UMetaSoundSource* FDreamSFXSoundDocument::PreviewSource(FString& Error) const
     return Source;
 }
 
-UMetaSoundSource* FDreamSFXSoundDocument::SaveAsset(FString& Error) const
+UMetaSoundSource* FDreamSFXSoundDocument::SaveAsset(FString& Error, bool bForce, bool* bWritten) const
 {
     if (!Graph || IsDirty()) { Error = TEXT("Save the instance before building the asset"); return nullptr; }
     if (!Library->AreSourcesCurrent(SelectedId, Dependencies(), Error)) return nullptr;
-    return DreamSFX::V2::SaveGraphSource(Graph, DreamSFX::V2::GraphPackageName(Graph->Id), Error);
+    const FName ExpectedId(*SelectedId);
+    if (Graph->Id != ExpectedId) { Error = TEXT("Compiled sound ID differs from the source declaration"); return nullptr; }
+    return DreamSFX::V2::SaveGraphSource(Graph, DreamSFX::V2::GraphPackageName(ExpectedId), Error, bForce, bWritten);
 }

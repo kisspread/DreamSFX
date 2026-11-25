@@ -443,6 +443,11 @@ namespace DreamSFX::V2
         return !Impl || Impl->Position == Impl->End;
     }
 
+    bool FGraphInstance::HasRenderError() const
+    {
+        return Impl && Impl->Runner && Impl->Runner->HasError();
+    }
+
     bool FGraphInstance::SetInput(FName Name,double Value)
     { return Impl&&Impl->Runner&&Impl->Runner->Input(Name,Value); }
     void FGraphInstance::ClearInput(FName Name)

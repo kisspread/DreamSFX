@@ -13,6 +13,9 @@
 
 namespace DreamSFX::V2
 {
+    // Bump when the generated MetaSound document or its serialization contract changes.
+    constexpr int32 GeneratedSourceVersion = 1;
+
     static UMetaSoundSource* BuildGraphSource(FGraphPtr Graph, UPackage* Package, FName Name, FString& Error, UMetaSoundSource* Existing = nullptr)
     {
         check(IsInGameThread());
@@ -77,7 +80,8 @@ namespace DreamSFX::V2
         const auto Input = Builder->FindNodeInputByName(Player, TEXT("Graph"), Result);
         if (Result != EMetaSoundBuilderResult::Succeeded) return Fail(TEXT("GraphPlayer graph input unavailable"));
         auto* Data = Existing ? FindObject<UDreamSFXGraphAsset>(Source,TEXT("DreamSFXGraph")) : NewObject<UDreamSFXGraphAsset>(Source, TEXT("DreamSFXGraph"), bPersist ? RF_Public : RF_Transient);
-        if (!Data || !Data->Initialize(MoveTemp(Graph), bPersist)) return Fail(TEXT("Cannot encode compiled graph"));
+        if (!Data || !Data->Initialize(MoveTemp(Graph), bPersist, GeneratedSourceVersion))
+            return Fail(TEXT("Cannot encode compiled graph"));
         Builder->SetNodeInputDefault(Input, Subsystem->CreateObjectMetaSoundLiteral(Data), Result);
         if (Result != EMetaSoundBuilderResult::Succeeded) return Fail(TEXT("Cannot bind compiled graph"));
 
@@ -99,26 +103,36 @@ namespace DreamSFX::V2
         return BuildGraphSource(MoveTemp(Graph), GetTransientPackage(), NAME_None, Error);
     }
 
-    UMetaSoundSource* SaveGraphSource(FGraphPtr Graph, const FString& LongPackageName, FString& Error)
+    UMetaSoundSource* SaveGraphSource(FGraphPtr Graph, const FString& LongPackageName, FString& Error,
+        bool bForce, bool* bWritten)
     {
-        if (!Graph || !LongPackageName.StartsWith(TEXT("/Game/DreamSFX/Graphs/")) ||
+        if (bWritten) *bWritten = false;
+        if (!Graph || LongPackageName != GraphPackageName(Graph->Id) ||
             !FPackageName::IsValidLongPackageName(LongPackageName))
         {
-            Error = TEXT("Expected a compiled graph and a package under /Game/DreamSFX/Graphs");
+            Error = TEXT("Expected the generated package path for this sound ID");
             return nullptr;
         }
         const FString Filename = FPackageName::LongPackageNameToFilename(LongPackageName, FPackageName::GetAssetPackageExtension());
         const FName Name(*FPackageName::GetLongPackageAssetName(LongPackageName));
         UPackage* Package = CreatePackage(*LongPackageName);
         // Refuse to overwrite a different type. A saved graph is rebuilt as a single package.
-        if (FPackageName::DoesPackageExist(LongPackageName)) Package->FullyLoad();
+        const bool bPackageExists = FPackageName::DoesPackageExist(LongPackageName);
+        if (bPackageExists) Package->FullyLoad();
         if (UObject* Existing = FindObject<UObject>(Package, *Name.ToString()))
         {
             auto* Source = Cast<UMetaSoundSource>(Existing);
             auto* Data = Source ? FindObject<UDreamSFXGraphAsset>(Source, TEXT("DreamSFXGraph")) : nullptr;
-            if (!Data || !Data->GetGraph() || Data->GetGraph()->Id != Graph->Id || IFileManager::Get().IsReadOnly(*Filename))
+            if (!Data || !Data->GetGraph() || Data->GetGraph()->Id != Graph->Id)
             {
                 Error = TEXT("Cannot update the existing package or it belongs to a different sound");
+                return nullptr;
+            }
+            if (!bForce && bPackageExists && !Package->IsDirty() && Data->MatchesBuild(*Graph, GeneratedSourceVersion))
+                return Source;
+            if (IFileManager::Get().IsReadOnly(*Filename))
+            {
+                Error = TEXT("Cannot update a read-only MetaSound package");
                 return nullptr;
             }
             const FGraphPtr Previous = Data->GetGraph();
@@ -132,11 +146,18 @@ namespace DreamSFX::V2
             if (!UPackage::SavePackage(Package, Source, *Filename, Args))
             {
                 BuildGraphSource(Previous,Package,Name,Error,Source);
+                Package->SetDirtyFlag(true);
                 Error = TEXT("Cannot update the MetaSound package");
                 return nullptr;
             }
             Source->UpdateAndRegisterForExecution(Metasound::Frontend::FMetaSoundAssetRegistrationOptions{});
+            if (bWritten) *bWritten = true;
             return Source;
+        }
+        if (bPackageExists)
+        {
+            Error = TEXT("The existing package does not contain the expected MetaSound Source");
+            return nullptr;
         }
         auto* Source = BuildGraphSource(MoveTemp(Graph), Package, Name, Error);
         if (!Source) return nullptr;
@@ -151,6 +172,7 @@ namespace DreamSFX::V2
             return nullptr;
         }
         FAssetRegistryModule::AssetCreated(Source);
+        if (bWritten) *bWritten = true;
         return Source;
     }
 }

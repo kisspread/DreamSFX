@@ -24,6 +24,7 @@ namespace DreamSFX::V2
         // Writes stereo PCM, zeroing the portion after the last frame. Returns frames consumed.
         int32 Render(float* Stereo, int32 Frames);
         bool IsFinished() const;
+        bool HasRenderError() const;
         int64 GetLengthFrames() const;
 
     private:

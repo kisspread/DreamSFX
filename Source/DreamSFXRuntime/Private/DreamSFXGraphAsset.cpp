@@ -3,12 +3,20 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogDreamSFXGraphAsset, Log, All);
 
-bool UDreamSFXGraphAsset::Initialize(DreamSFX::V2::FGraphPtr InGraph, bool bPersist)
+bool UDreamSFXGraphAsset::Initialize(DreamSFX::V2::FGraphPtr InGraph, bool bPersist, int32 BuildVersion)
 {
     if (!InGraph) return false;
     if (bPersist && !DreamSFX::V2::EncodeGraph(*InGraph, Payload)) return false;
+    if (bPersist) SourceBuildVersion = BuildVersion;
     Graph = MoveTemp(InGraph);
     return true;
+}
+
+bool UDreamSFXGraphAsset::MatchesBuild(const DreamSFX::V2::FGraphIR& Candidate, int32 BuildVersion) const
+{
+    if (SourceBuildVersion != BuildVersion) return false;
+    TArray<uint8> CandidatePayload;
+    return DreamSFX::V2::EncodeGraph(Candidate, CandidatePayload) && CandidatePayload == Payload;
 }
 
 void UDreamSFXGraphAsset::PostLoad()

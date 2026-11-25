@@ -5,17 +5,25 @@
 
 class UMetaSoundSource;
 
+struct FDreamSFXSourceDiagnostic
+{
+    FString Path, Code, Message;
+    int32 Line = 0;
+    int32 Column = 0;
+};
+
 struct FDreamSFXGraphTextEntry
 {
     FString Id, Kind, Path, Text, ParentId;
     struct { FString DisplayName, Description; } Meta;
+    int32 DeclarationIdOffset = INDEX_NONE;
 };
 
 struct FDreamSFXLibrarySnapshot
 {
     FString Root, Error;
     TArray<FDreamSFXGraphTextEntry> Entries;
-    bool Load(const FString& Folder);
+    bool Load(const FString& Folder, TArray<FDreamSFXSourceDiagnostic>* Diagnostics = nullptr);
     const FDreamSFXGraphTextEntry* Find(const FString& Id) const;
     bool TryCategory(const FDreamSFXGraphTextEntry& Entry, TArray<FString>& Out) const;
     bool AreSourcesCurrent(const FString& Id, const TArray<FString>& Dependencies, FString& Error) const;
@@ -35,13 +43,13 @@ public:
     using FSnapshot = TSharedPtr<const FDreamSFXLibrarySnapshot, ESPMode::ThreadSafe>;
     bool Load(const FString& Root, const FString& Id, FString& Error);
     bool LoadFromSnapshot(FSnapshot Snapshot, const FString& Id, FString& Error,
-        const FString& Draft = {}, const FString& Baseline = {});
+        const FString& Draft = {}, const FString& Baseline = {}, FDreamSFXSourceDiagnostic* Diagnostic = nullptr);
     bool SetOverride(const FDreamSFXInstanceParameter& Parameter, TOptional<double> Value, FString& Error);
     bool Save(FString& Error);
     bool CreateInstance(const FString& RelativeFolder, const FString& Name, FString& Error);
     bool CreateProjectInstance(const FString& ProjectRoot, const FString& Name, FString& Error);
     UMetaSoundSource* PreviewSource(FString& Error) const;
-    UMetaSoundSource* SaveAsset(FString& Error) const;
+    UMetaSoundSource* SaveAsset(FString& Error, bool bForce = true, bool* bWritten = nullptr) const;
 
     bool IsLoaded() const { return Graph.IsValid(); }
     bool IsInstance() const { return !MotherId.IsEmpty(); }

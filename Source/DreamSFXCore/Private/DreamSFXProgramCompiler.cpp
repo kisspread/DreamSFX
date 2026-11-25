@@ -64,6 +64,7 @@ namespace ProgramSyntax
         FStatement Origin;
         FString Error;
         int32 ErrorOffset=0;
+        const TCHAR* ErrorCode = TEXT("DSFX210");
         FString Mark;
         TMap<FString,const FStatement*> Patches;
         void Locate(const FStatement& S){Origin.Text=S.Text;Origin.Line=S.Line;Origin.Column=S.Column;Mark.Reset();}
@@ -607,10 +608,17 @@ namespace ProgramSyntax
             {
                 Locate(*L);TArray<FString> Words;L->Text.ParseIntoArrayWS(Words);
                 if(Words.Num()!=7||Words[2]!=TEXT("range")||Words[5]!=TEXT("default")||P.Inputs.Num()>=8)return Fail(TEXT("Expected input name range min max default value (up to eight inputs)"));
+                const FName InputName(Words[1]);
+                if (InputName.IsNone() || InputName == TEXT("State") || InputName == TEXT("Loop"))
+                {
+                    ErrorCode = TEXT("DSFX211");
+                    Focus(Words[1]);
+                    return Fail(FString::Printf(TEXT("'%s' is reserved for MetaSound; choose another input name"), *Words[1]));
+                }
                 auto& In=P.Inputs.AddDefaulted_GetRef();
                 if(!Register(Words[1],In.Register)||!Number(Words[3],In.Min)||!Number(Words[4],In.Max)||!Number(Words[6],In.Default)||
                     In.Min>In.Max||!FMath::IsWithinInclusive(In.Default,In.Min,In.Max))return Fail(TEXT("Expected ordered finite limits and a default inside them"));
-                In.Name=FName(Words[1]);Graph.Inputs.Add({In.Name,In.Min,In.Max,In.Default});
+                In.Name=InputName;Graph.Inputs.Add({In.Name,In.Min,In.Max,In.Default});
             }
             if(auto** S=Single.Find(TEXT("memory")))for(const auto& L:(*S)->Children){Locate(L);if(!Assignment(L.Text,P.Memory))return false;FString K,V;L.Text.Split(TEXT("="),&K,&V);Writable.Add(Trim(K));}
             P.Random=Graph.Seed;if(auto** S=Single.Find(TEXT("resources")))if(!ReadResources(**S,Graph.Seed))return false;
@@ -715,7 +723,11 @@ bool CompileSoundProgram(const FString& Text,FGraphIR& Graph,TArray<FDiagnostic>
     ProgramSyntax::FBuilder Builder{*Program,Graph};
     if(!Builder.Read(Tree))
     {
-        Errors.Add(Dsl::Expected(Builder.Origin,Builder.Error.IsEmpty()?TEXT("Invalid DSL declaration"):Builder.Error,Builder.ErrorOffset));return false;
+        auto Diagnostic = Dsl::Expected(Builder.Origin,
+            Builder.Error.IsEmpty() ? TEXT("Invalid DSL declaration") : Builder.Error, Builder.ErrorOffset);
+        Diagnostic.Code = Builder.ErrorCode;
+        Errors.Add(MoveTemp(Diagnostic));
+        return false;
     }
     for(const auto& State:Program->States)Graph.StateNames.Add(State.Name);
     Program->Source=Text;Graph.Program=MoveTemp(Program);return true;

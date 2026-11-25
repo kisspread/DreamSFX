@@ -27,6 +27,14 @@ namespace DreamSFX::V2
             if(!TestTrue(TEXT("Invalid program rejected with a source coordinate"),!Result.Graph&&Result.Errors.Num()&&Result.Errors[0].Pointer.Contains(TEXT(":"))))return false;
             AddInfo(Result.Errors[0].Pointer+TEXT(" ")+Result.Errors[0].Message);
         }
+        for (const TCHAR* Name : {TEXT("Loop"), TEXT("lOoP"), TEXT("state"), TEXT("None")})
+        {
+            const auto Result = FGraphCompiler::Compile(Example.Replace(TEXT("pitch"), Name));
+            if (!TestTrue(TEXT("Reserved MetaSound input is rejected"), !Result.Graph && !Result.Errors.IsEmpty()))
+                return false;
+            TestEqual(TEXT("Reserved input diagnostic"), Result.Errors[0].Code, FString(TEXT("DSFX211")));
+            TestEqual(TEXT("Reserved input location"), Result.Errors[0].Pointer, FString(TEXT("5:7")));
+        }
         return !HasAnyErrors();
     }
 
