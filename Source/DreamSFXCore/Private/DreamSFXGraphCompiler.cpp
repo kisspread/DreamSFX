@@ -63,28 +63,4 @@ namespace DreamSFX::V2
         Result.Graph=MakeShared<const FGraphIR,ESPMode::ThreadSafe>(MoveTemp(Graph));
         return Result;
     }
-
-    TArray<FEditableNumber> FGraphCompiler::EditableNumbers(const FGraphIR& Graph)
-    {
-        TArray<FEditableNumber> Result;
-        if (Graph.Program)
-        {
-            for (const auto& In : Graph.Inputs)
-                Result.Add({In.Name,TEXT("default"),In.Default,In.Minimum,In.Maximum,TEXT(""),false});
-            return Result;
-        }
-        for (const auto& Node : Graph.Nodes)
-        {
-            const FNodeSpec* Spec = FindNodeType(Node.Type);
-            if (!Spec) continue;
-            for (const auto& Control : Spec->Controls)
-                Result.Add({Node.Id, Control.Name, Node.Parameters.FindChecked(Control.Name).Get<double>(),
-                    Control.Minimum, Control.Maximum, Control.Unit, false});
-            for (const auto& Field : Spec->Properties)
-                if ((Field.Kind == EPropertyKind::Number || Field.Kind == EPropertyKind::Integer) && Field.AllowedNumbers.IsEmpty())
-                    Result.Add({Node.Id, Field.Name, Node.Parameters.FindChecked(Field.Name).Get<double>(),
-                        Field.Minimum, Field.Maximum, FString(), Field.Kind == EPropertyKind::Integer});
-        }
-        return Result;
-    }
 }
