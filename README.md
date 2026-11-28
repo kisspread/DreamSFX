@@ -4,7 +4,7 @@
 
 A `.dsfx` file can describe a two-note menu chime, a piano and music-box duet, or a spell that swells as a player holds a button. Write the notes, signal paths and rules in a text editor, audition them in Unreal, then build a stereo MetaSound Source. A Blueprint can play it and drive the inputs you named in the file.
 
-[简体中文](README.zh-CN.md) · [83 factory presets](Resources/Presets/) · [DSL reference](https://github.com/kisspread/SoundLab/blob/main/Docs/TextFormat.md) · [SoundLab demo project](https://github.com/kisspread/SoundLab)
+[简体中文](README.zh-CN.md) · [Quick start](#quick-start) · [83 factory presets](Resources/Presets/) · [Command-line audition](#authoring-with-ai-and-the-command-line)
 
 ## What a sound looks like
 
@@ -27,13 +27,14 @@ The chime plays C5 then G5 on a sine voice. Change `G5` to `E5` for a smaller up
 
 ## Quick start
 
-1. Clone the demo project with its two plugins, build the **SoundLabEditor** target for UE 5.8, then open `SoundLab.uproject`.
+1. From the root of your UE 5.8 project (the folder containing its `.uproject` file), clone DreamSFX and its synth dependency into sibling folders under `Plugins/`.
 
    ```sh
-   git clone --recurse-submodules https://github.com/kisspread/SoundLab.git
+   git clone https://github.com/kisspread/DreamSFX.git Plugins/DreamSFX
+   git clone https://github.com/kisspread/EightBitMetaSound.git Plugins/EightBitMetaSound
    ```
 
-   In an existing UE 5.8 project, place **DreamSFX** and **EightBitMetaSound** side by side under `Plugins/`, enable DreamSFX and MetaSound, and build the project's Editor target. EightBitMetaSound supplies the retro synth. [EightBitMetaSound repository](https://github.com/kisspread/EightBitMetaSound)
+   EightBitMetaSound supplies the DSP for retro pulse, noise and one-shot sounds. Build your project's Editor target, open it in Unreal Editor and check that **DreamSFX** is enabled under **Edit → Plugins**.
 
 2. Open **Window → DreamSFX Sounds → Factory presets**. Under **UI**, double-click the confirmation sound to hear it and see its waveform. **Preview volume** adjusts your listening level.
 3. For a lower variation, select the sound, enter an instance name and click **Create project instance**. Enable the `transposeBy` override, set it to `-5`, then click **Save instance**. To write a new sound, put a UTF-8 `.dsfx` file with its own sound ID under the project's `DSFX/` directory and select **Project sounds**.
@@ -52,11 +53,11 @@ The chime plays C5 then G5 on a sine voice. Change `G5` to `E5` for a smaller up
 
 Give an AI a sound brief and the nearest factory preset. For this chime, try “keep the first note, lower the second to E5, and leave the volume alone.” Review the change in the `.dsfx` diff. The `DreamSFXGraphAssets` commandlet can compile the result, render a listening WAV and return diagnostics with a file, code and, when available, line and column.
 
-From the SoundLab root in PowerShell, set `UE_ROOT` to your engine installation directory (the directory containing `Engine/`). This command validates and renders the example above.
+In PowerShell, set `UE_ROOT` to your Unreal Engine installation directory (the folder containing `Engine/`). Run this from the folder containing your `.uproject` to validate and render the chime.
 
 ```powershell
 $editor = Join-Path $env:UE_ROOT 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
-$project = (Resolve-Path './SoundLab.uproject').Path
+$project = (Get-Item ./*.uproject).FullName
 $presets = (Resolve-Path './Plugins/DreamSFX/Resources/Presets').Path
 $out = Join-Path (Get-Location) 'Saved/DreamSFX/ReadmeAudition'
 & $editor $project -run=DreamSFXGraphAssets "-SourceDir=$presets" `
@@ -75,4 +76,4 @@ Open the WAV in `Saved/DreamSFX/ReadmeAudition/`. The JSON report includes the i
 | [DreamSFXMetaSound](Source/DreamSFXMetaSound/) | Implements Graph Player and connects UE triggers and parameters to the running sound. |
 | [DreamSFXEditor](Source/DreamSFXEditor/) | Provides the preset browser, waveform, instance controls, asset builder and batch commandlet. |
 
-DreamSFX **2.0.0 beta** has been built and tested on **Win64 with UE 5.8**. The SoundLab repository hosts the authoring guide and language reference, both in Chinese. [Authoring guide](https://github.com/kisspread/SoundLab/blob/main/Docs/DreamSFX-QuickStart.md) · [Language and nodes](https://github.com/kisspread/SoundLab/blob/main/Docs/TextFormat.md)
+DreamSFX **2.0.0 beta** has been built and tested on **Win64 with UE 5.8**.

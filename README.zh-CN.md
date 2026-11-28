@@ -4,7 +4,7 @@
 
 一份 `.dsfx` 可以是菜单里两个音符的确认声，可以是钢琴和八音盒的合奏，也可以是按住按钮不断蓄力的法术。用文本编辑器写音符、信号链和触发规则，在 UE 里试听，再生成一个立体声 MetaSound Source。蓝图可以直接播放它，也可以用文件里起的参数名控制它。
 
-[English](README.md) · [83 个内置预设](Resources/Presets/) · [DSL 语言参考](https://github.com/kisspread/SoundLab/blob/main/Docs/TextFormat.md) · [SoundLab 演示工程](https://github.com/kisspread/SoundLab)
+[English](README.md) · [快速上手](#快速上手) · [83 个内置预设](Resources/Presets/) · [命令行试听](#和-ai-一起写用命令行试听)
 
 ## 一个声音长什么样
 
@@ -27,13 +27,14 @@ output chime.tone
 
 ## 快速上手
 
-1. 递归克隆演示工程和两个插件，用 UE 5.8 编译 **SoundLabEditor**，打开 `SoundLab.uproject`。
+1. 在自己的 UE 5.8 工程根目录（`.uproject` 所在目录）分别克隆 DreamSFX 和它依赖的合成器，两个插件并排放在 `Plugins/` 下。
 
    ```sh
-   git clone --recurse-submodules https://github.com/kisspread/SoundLab.git
+   git clone https://github.com/kisspread/DreamSFX.git Plugins/DreamSFX
+   git clone https://github.com/kisspread/EightBitMetaSound.git Plugins/EightBitMetaSound
    ```
 
-   如果用自己的 UE 5.8 工程，把 **DreamSFX** 和 **EightBitMetaSound** 并排放在 `Plugins/` 下，启用 DreamSFX 和 MetaSound，再编译工程的 Editor 目标。EightBitMetaSound 提供复古合成器。[EightBitMetaSound 仓库](https://github.com/kisspread/EightBitMetaSound)
+   EightBitMetaSound 为复古脉冲波、噪声和单发音效提供合成内核。编译当前工程的 Editor 目标，打开 Unreal Editor，在 **Edit → Plugins** 中确认 **DreamSFX** 已启用。
 
 2. 打开 **Window → DreamSFX Sounds → Factory presets**，在 **UI** 分类下双击确认音，听声音、看波形。**Preview volume** 只调节试听音量。
 3. 要做低音版，选中确认音，填好实例名，点 **Create project instance**。勾选 `transposeBy`，设为 `-5`，再点 **Save instance**。要从头写声音，就给 UTF-8 的 `.dsfx` 文件取一个唯一的声音 ID，放进工程的 `DSFX/`，然后选 **Project sounds**。
@@ -52,11 +53,11 @@ output chime.tone
 
 把听感要求和最接近的预设交给 AI。拿上面的确认音来说，可以只提一句“保留第一个音，把第二个音降到 E5，音量照旧”，然后直接看 `.dsfx` 的 diff。`DreamSFXGraphAssets` 可以编译这份文本、导出试听 WAV，并在 JSON 报告中给出诊断码、文件路径和可定位的行列号。
 
-在 PowerShell 中把 `UE_ROOT` 环境变量设为引擎安装目录（包含 `Engine/` 的那一层）。从 SoundLab 根目录执行下面的命令，会校验并渲染上面的确认音。
+在 PowerShell 中把 `UE_ROOT` 环境变量设为引擎安装目录（包含 `Engine/` 的那一层）。从自己工程的 `.uproject` 所在目录执行下面的命令，即可校验并渲染上面的确认音。
 
 ```powershell
 $editor = Join-Path $env:UE_ROOT 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
-$project = (Resolve-Path './SoundLab.uproject').Path
+$project = (Get-Item ./*.uproject).FullName
 $presets = (Resolve-Path './Plugins/DreamSFX/Resources/Presets').Path
 $out = Join-Path (Get-Location) 'Saved/DreamSFX/ReadmeAudition'
 & $editor $project -run=DreamSFXGraphAssets "-SourceDir=$presets" `
@@ -75,4 +76,4 @@ $out = Join-Path (Get-Location) 'Saved/DreamSFX/ReadmeAudition'
 | [DreamSFXMetaSound](Source/DreamSFXMetaSound/) | 提供 Graph Player，把 UE 的触发器和参数接入正在运行的声音。 |
 | [DreamSFXEditor](Source/DreamSFXEditor/) | 提供预设浏览、波形试听、实例调参、资产生成和批处理命令。 |
 
-DreamSFX **2.0.0 beta** 已在 **Win64 / UE 5.8** 上编译并运行验证。创作指南和语言规范随 SoundLab 工程维护。[创作指南](https://github.com/kisspread/SoundLab/blob/main/Docs/DreamSFX-QuickStart.md) · [DSL 语法与节点](https://github.com/kisspread/SoundLab/blob/main/Docs/TextFormat.md)
+DreamSFX **2.0.0 beta** 已在 **Win64 / UE 5.8** 上编译并运行验证。
