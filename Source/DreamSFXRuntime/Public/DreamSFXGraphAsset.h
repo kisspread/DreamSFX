@@ -21,6 +21,8 @@ class DREAMSFXRUNTIME_API UDreamSFXGraphAsset : public UObject, public IAudioPro
 
 public:
     bool Initialize(DreamSFX::V2::FGraphPtr InGraph, bool bPersist, int32 BuildVersion = 0);
+    int32 GetSourceBuildVersion() const { return SourceBuildVersion; }
+    void SetSourceBuildVersion(int32 Version) { SourceBuildVersion = Version; }
     bool MatchesBuild(const DreamSFX::V2::FGraphIR& Candidate, int32 BuildVersion) const;
     DreamSFX::V2::FGraphPtr GetGraph() const { return Graph; }
     void PostLoad() override;

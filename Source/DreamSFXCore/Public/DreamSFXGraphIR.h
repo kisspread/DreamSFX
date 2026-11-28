@@ -10,7 +10,8 @@ namespace DreamSFX::V2
         static const FName Pins[]={TEXT("Control 1"),TEXT("Control 2"),TEXT("Control 3"),TEXT("Control 4"),TEXT("Control 5"),TEXT("Control 6"),TEXT("Control 7"),TEXT("Control 8")};
         return Pins[Index];
     }
-    constexpr float UnsetProgramControl=-MAX_flt;
+    // Read older generated Sources and allow existing callers to clear an override.
+    constexpr float UnsetProgramControl = -MAX_flt;
     enum class EPortKind : uint8 { Audio, Control, Event };
     enum class EAction : uint8 { Trigger, Set, Linear, Exponential, Target, NoteOn, NoteOff, Sustain, Fire, ContinuousGate };
 
@@ -89,7 +90,29 @@ namespace DreamSFX::V2
         FPortRef Output;
         TArray<FName> ExecutionOrder; // Topological schedule of instantaneous dependencies.
         TSharedPtr<const struct FSoundProgram, ESPMode::ThreadSafe> Program;
-        struct FInput { FName Name; double Minimum, Maximum, Default; };
+        struct FInput
+        {
+            FName Name;
+            double Minimum, Maximum, Default;
+            bool bHasAuditionExpression = false;
+
+            float MetaSoundDefault() const
+            {
+                if (!bHasAuditionExpression) return static_cast<float>(Default);
+
+                // Reserve a value outside the manual range, so setting the actual DSL
+                // default explicitly can still override a moving audition curve.
+                if (Minimum > -1.) return -1.f;
+                if (Maximum < 1.) return 1.f;
+                const float Below = static_cast<float>(FMath::FloorToDouble(Minimum) - 1.);
+                if (FMath::IsFinite(Below) && Below > UnsetProgramControl && Below < Minimum) return Below;
+                const float Above = static_cast<float>(FMath::CeilToDouble(Maximum) + 1.);
+                if (FMath::IsFinite(Above) && Above > Maximum) return Above;
+                // Wide bipolar ranges can have no spare float at either endpoint.
+                // Signed zero supplies an automatic state while ordinary +0 stays manual.
+                return -0.f;
+            }
+        };
         TArray<FInput> Inputs;
         TArray<FName> StateNames;
     };

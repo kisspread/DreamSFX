@@ -709,6 +709,8 @@ namespace ProgramSyntax
                 if(I==INDEX_NONE||Bound.Contains(Name)||!FMath::IsWithinInclusive(N,P.Inputs[I].Min,P.Inputs[I].Max))return Fail(TEXT("Expected an unbound input and a value inside its range"));
                 Bound.Add(Name);P.Inputs[I].Default=Graph.Inputs[I].Default=N;P.Inputs[I].Preview.Code.Reset();
             }
+            for (int32 Index = 0; Index < Graph.Inputs.Num(); ++Index)
+                Graph.Inputs[Index].bHasAuditionExpression = !P.Inputs[Index].Preview.Code.IsEmpty();
             Locate(*Single[TEXT("output")]);const FString Out=Trim(Origin.Text.Mid(7));
             if(!NodeTypes.Contains(Out)||FindNodeType({FName(NodeTypes[Out]),Versions[Out]})->Output(TEXT("audio"))!=EPortKind::Audio)return Fail(TEXT("Expected an audio output node"));
             Graph.Output={FName(Out),TEXT("audio")};return true;

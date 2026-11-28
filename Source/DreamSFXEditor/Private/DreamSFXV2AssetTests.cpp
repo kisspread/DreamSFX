@@ -2,6 +2,12 @@
 #include "DreamSFXGraphInstance.h"
 #include "HAL/PlatformMemory.h"
 #include "MetasoundSource.h"
+#include "MetasoundFrontendDocument.h"
+#include "Editor.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
+#include "Misc/ScopeExit.h"
+#include "Subsystems/AssetEditorSubsystem.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/CommandLine.h"
 #include "Misc/PackageName.h"
@@ -100,4 +106,101 @@ bool FDreamSFXV2CutoverPerformance::RunTest(const FString&)
     AddInfo(FString::Printf(TEXT("DSFX_MIXED32 sampleRate=48000 block=256 blocks=1000 p99Ms=%.6f"), P99));
     return TestTrue(TEXT("32 mixed graph instances: render p99 below 1 ms"), P99 < 1.0);
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDreamSFXGeneratedSourceLayout, "DreamSFX.Editor.GeneratedSourceLayout",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDreamSFXGeneratedSourceLayout::RunTest(const FString&)
+{
+    // Opening the actual asset editor checks the visible pins, including UE's input templates.
+    FString PackagePath;
+    if (!FParse::Value(FCommandLine::Get(), TEXT("DreamSFXLayoutAsset="), PackagePath)) return true;
+
+    auto* Source = LoadObject<UMetaSoundSource>(nullptr,
+        *(PackagePath + TEXT(".") + FPackageName::GetLongPackageAssetName(PackagePath)));
+    if (!TestNotNull(TEXT("Load saved Source"), Source)) return false;
+    auto* Data = FindObject<UDreamSFXGraphAsset>(Source, TEXT("DreamSFXGraph"));
+    if (!TestTrue(TEXT("Embedded sound is available"), Data && Data->GetGraph())) return false;
+
+    const auto& Saved = static_cast<IMetaSoundDocumentInterface&>(*Source).GetConstDocument();
+    const auto* PlayerClass = Saved.Dependencies.FindByPredicate([](const auto& Dependency)
+    {
+        return Dependency.Metadata.GetClassName() == FMetasoundFrontendClassName(TEXT("DreamSFX"), TEXT("GraphPlayer"));
+    });
+    if (!TestNotNull(TEXT("Saved Graph Player dependency"), PlayerClass)) return false;
+    // Check before opening the editor, which can upgrade obsolete class defaults in memory.
+    for (int32 Index = 0; Index < 8; ++Index)
+    {
+        const auto* Input = PlayerClass->GetDefaultInterface().Inputs.FindByPredicate([&](const auto& Vertex)
+        {
+            return Vertex.Name == DreamSFX::V2::ProgramControlPin(Index);
+        });
+        float Default = 0.f;
+        if (!TestTrue(TEXT("Stored control pin has neutral default"), Input && !Input->GetDefaults().IsEmpty() &&
+            Input->GetDefaults()[0].Literal.TryGet(Default) && Default == 0.f)) return false;
+    }
+
+    auto* Editors = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+    const bool bAlreadyOpen = Editors->FindEditorForAsset(Source, false) != nullptr;
+    if (!TestTrue(TEXT("Open MetaSound editor"), Editors->OpenEditorForAsset(Source))) return false;
+    ON_SCOPE_EXIT { if (!bAlreadyOpen) Editors->CloseAllEditorsForAsset(Source); };
+
+    UEdGraph* Canvas = Source->GetGraph();
+    if (!TestNotNull(TEXT("Source has an editor canvas"), Canvas)) return false;
+    UEdGraphNode* Player = nullptr;
+    for (UEdGraphNode* Node : Canvas->Nodes)
+    {
+        if (Node && Node->FindPin(TEXT("Graph"), EGPD_Input) && Node->FindPin(TEXT("Play"), EGPD_Input))
+        {
+            if (!TestNull(TEXT("Exactly one player is drawn"), Player)) return false;
+            Player = Node;
+        }
+    }
+    if (!TestNotNull(TEXT("Graph Player is visible"), Player)) return false;
+
+    TSet<FIntPoint> MemberPositions;
+    auto CheckWire = [&](FName Name, EEdGraphPinDirection Direction)
+    {
+        const UEdGraphPin* Pin = Player->FindPin(Name, Direction);
+        if (!TestTrue(Name.ToString() + TEXT(" has one visible wire"), Pin && Pin->LinkedTo.Num() == 1))
+            return;
+        const UEdGraphNode* Member = Pin->LinkedTo[0]->GetOwningNode();
+        if (!TestNotNull(Name.ToString() + TEXT(" connects to a canvas node"), Member)) return;
+        const FIntPoint Position(Member->NodePosX, Member->NodePosY);
+        TestFalse(Name.ToString() + TEXT(" has its own canvas position"), MemberPositions.Contains(Position));
+        MemberPositions.Add(Position);
+    };
+    CheckWire(TEXT("Play"), EGPD_Input);
+    CheckWire(TEXT("Loop"), EGPD_Input);
+    CheckWire(TEXT("State"), EGPD_Input);
+    const auto& Document = static_cast<IMetaSoundDocumentInterface&>(*Source).GetConstDocument();
+    for (int32 Index = 0; Index < Data->GetGraph()->Inputs.Num(); ++Index)
+    {
+        const auto& Control = Data->GetGraph()->Inputs[Index];
+        CheckWire(DreamSFX::V2::ProgramControlPin(Index), EGPD_Input);
+        const auto* Input = Document.RootGraph.GetDefaultInterface().Inputs.FindByPredicate(
+            [&](const auto& Vertex) { return Vertex.Name == Control.Name; });
+        if (!TestTrue(TEXT("Named control has a saved default"), Input && !Input->GetDefaults().IsEmpty())) return false;
+        float Value = 0.f;
+        if (!Input->GetDefaults()[0].Literal.TryGet(Value)) return false;
+        TestEqual(Control.Name.ToString() + TEXT(" member default"), Value, Control.MetaSoundDefault());
+        TestTrue(TEXT("Display default is finite and readable"), FMath::IsFinite(Value) && Value != DreamSFX::V2::UnsetProgramControl);
+        AddInfo(FString::Printf(TEXT("Graph input %s = %g, DSL default %g, audition expression %d"),
+            *Control.Name.ToString(), Value, Control.Default, Control.bHasAuditionExpression));
+    }
+    for (int32 Index = Data->GetGraph()->Inputs.Num(); Index < 8; ++Index)
+    {
+        const auto* Pin = Player->FindPin(DreamSFX::V2::ProgramControlPin(Index), EGPD_Input);
+        TestTrue(TEXT("Unused control is initially hidden or advanced"), Pin && Pin->LinkedTo.IsEmpty() &&
+            (Pin->bHidden || (Pin->bAdvancedView && Player->AdvancedPinDisplay == ENodeAdvancedPins::Hidden)));
+        if (Pin) TestTrue(TEXT("Unused control has a neutral default"), FCString::Atof(*Pin->DefaultValue) == 0.f);
+    }
+    CheckWire(TEXT("Out Left"), EGPD_Output);
+    CheckWire(TEXT("Out Right"), EGPD_Output);
+    CheckWire(TEXT("On Finished"), EGPD_Output);
+    AddInfo(FString::Printf(TEXT("Canvas %s: %d nodes, %d wired members"), *PackagePath,
+        Canvas->Nodes.Num(), MemberPositions.Num()));
+    return !HasAnyErrors();
+}
+
 #endif

@@ -54,14 +54,16 @@ namespace DreamSFX::V2
     public:
         FGraphPlayerOperator(const FOperatorSettings& Settings, const FTriggerReadRef& InPlay, const FDreamSFXGraphRefReadRef& InGraph, const FBoolReadRef& InLoop,const FBuildOperatorParams& Params)
             : Play(InPlay), Graph(InGraph), Loop(InLoop), Left(FAudioBufferWriteRef::CreateNew(Settings)), Right(FAudioBufferWriteRef::CreateNew(Settings)),
-            Finished(FTriggerWriteRef::CreateNew(Settings))
+            Finished(FTriggerWriteRef::CreateNew(Settings)),
+            StateInput(Params.InputData.GetOrCreateDefaultDataReadReference<FString>(METASOUND_GET_PARAM_NAME(State), Settings))
         {
-            if(Graph->Graph && Graph->Graph->Program)
+            for (int32 Index = 0; Index < 8; ++Index)
+                InputValues.Add(Params.InputData.GetOrCreateDefaultDataReadReference<float>(ProgramControlPin(Index), Settings));
+
+            if (Graph->Graph)
             {
-                StateInput.Emplace(Params.InputData.GetOrCreateDefaultDataReadReference<FString>(METASOUND_GET_PARAM_NAME(State),Settings));
-                for(int32 I=0;I<Graph->Graph->Inputs.Num();++I)
-                    InputValues.Add(Params.InputData.GetOrCreateDefaultDataReadReference<float>(ProgramControlPin(I),Settings));
-                for(FName Name:Graph->Graph->StateNames)StateLabels.Add(Name.ToString());
+                for (FName Name : Graph->Graph->StateNames) StateLabels.Add(Name.ToString());
+                for (const auto& Input : Graph->Graph->Inputs) ControlDefaults.Add(Input.MetaSoundDefault());
             }
             FString Error;
             bPrepared = Instance.Prepare(Graph->Graph, FMath::RoundToInt(Settings.GetSampleRate()), Error);
@@ -79,7 +81,7 @@ namespace DreamSFX::V2
                     TInputDataVertex<FDreamSFXGraphRef>(METASOUND_GET_PARAM_NAME_AND_METADATA(Graph)),
                     TInputDataVertex<bool>(METASOUND_GET_PARAM_NAME_AND_METADATA(Loop), false),
                     TInputDataVertex<FString>(METASOUND_GET_PARAM_NAME_AND_METADATA(State),FString()));
-                for(int32 I=0;I<8;++I)Inputs.Add(TInputDataVertex<float>(ProgramControlPin(I),FDataVertexMetadata{},UnsetProgramControl));
+                for(int32 I=0;I<8;++I)Inputs.Add(TInputDataVertex<float>(ProgramControlPin(I),FDataVertexMetadata::EmptyAdvanced,0.f));
                 return FVertexInterface(MoveTemp(Inputs),
                 FOutputVertexInterface(
                     TOutputDataVertex<FAudioBuffer>(METASOUND_GET_PARAM_NAME_AND_METADATA(Left)),
@@ -95,7 +97,7 @@ namespace DreamSFX::V2
                 FNodeClassMetadata Info;
                 Info.ClassName = {TEXT("DreamSFX"), TEXT("GraphPlayer"), NAME_None};
                 Info.MajorVersion = 1;
-                Info.MinorVersion = 1;
+                Info.MinorVersion = 2;
                 Info.DisplayName = LOCTEXT("GraphPlayerName", "DreamSFX Graph Player");
                 Info.Description = LOCTEXT("GraphPlayerDescription", "Plays one immutable DreamSFX graph.");
                 Info.Author = TEXT("DreamSFX");
@@ -120,7 +122,7 @@ namespace DreamSFX::V2
             Inputs.BindReadVertex(METASOUND_GET_PARAM_NAME(Play), Play);
             Inputs.BindReadVertex(METASOUND_GET_PARAM_NAME(Graph), Graph);
             Inputs.BindReadVertex(METASOUND_GET_PARAM_NAME(Loop), Loop);
-            if(StateInput)Inputs.BindReadVertex(METASOUND_GET_PARAM_NAME(State),StateInput.GetValue());
+            Inputs.BindReadVertex(METASOUND_GET_PARAM_NAME(State), StateInput);
             for(int32 I=0;I<InputValues.Num();++I)Inputs.BindReadVertex(ProgramControlPin(I),InputValues[I]);
         }
 
@@ -144,9 +146,9 @@ namespace DreamSFX::V2
             Left->Zero();
             Right->Zero();
             Finished->AdvanceBlock();
-            if(StateInput)
+            if (Graph->Graph && Graph->Graph->Program)
             {
-                const FString& Requested=*StateInput.GetValue();
+                const FString& Requested = *StateInput;
                 if(Requested.IsEmpty())
                 {
                     if(LastState!=INDEX_NONE){Instance.SetState(NAME_None);LastState=INDEX_NONE;}
@@ -156,10 +158,14 @@ namespace DreamSFX::V2
                     const int32 I=StateLabels.IndexOfByKey(Requested);
                     if(I!=INDEX_NONE){Instance.SetState(Graph->Graph->StateNames[I]);LastState=I;}
                 }
-                for(int32 I=0;I<InputValues.Num();++I)
+                for (int32 Index = 0; Index < ControlDefaults.Num(); ++Index)
                 {
-                    const FName Name=Graph->Graph->Inputs[I].Name;const float Value=*InputValues[I];
-                    if(Value==UnsetProgramControl)Instance.ClearInput(Name);else Instance.SetInput(Name,Value);
+                    const FName Name = Graph->Graph->Inputs[Index].Name;
+                    const float Value = *InputValues[Index];
+                    if (FMath::AsUInt(Value) == FMath::AsUInt(ControlDefaults[Index]) || Value == UnsetProgramControl)
+                        Instance.ClearInput(Name);
+                    else
+                        Instance.SetInput(Name, Value);
                 }
             }
             const int32 BlockFrames = Left->Num();
@@ -210,7 +216,8 @@ namespace DreamSFX::V2
         FAudioBufferWriteRef Left, Right;
         FTriggerWriteRef Finished;
         TArray<FFloatReadRef> InputValues;
-        TOptional<FStringReadRef> StateInput;
+        TArray<float, TInlineAllocator<8>> ControlDefaults;
+        FStringReadRef StateInput;
         TArray<FString> StateLabels;
         int32 LastState=INDEX_NONE;
         FGraphInstance Instance;

@@ -2,6 +2,10 @@
 #include "DreamSFXGraphAsset.h"
 #include "MetasoundBuilderSubsystem.h"
 #include "MetasoundBuilderBase.h"
+#include "MetasoundDocumentBuilderRegistry.h"
+#include "MetasoundFrontendRegistryKey.h"
+#include "UObject/UnrealType.h"
+#include "NodeTemplates/MetasoundFrontendNodeTemplateInput.h"
 #include "MetasoundGlobals.h"
 #include "MetasoundSource.h"
 #include "UObject/Package.h"
@@ -14,7 +18,83 @@
 namespace DreamSFX::V2
 {
     // Bump when the generated MetaSound document or its serialization contract changes.
-    constexpr int32 GeneratedSourceVersion = 1;
+    constexpr int32 EditorLayoutVersion = 2;
+    constexpr int32 ControlDefaultsVersion = 4;
+    constexpr int32 GeneratedSourceVersion = ControlDefaultsVersion;
+
+    static void ConfigureControlDefaults(FMetaSoundFrontendDocumentBuilder& Builder, const FGraphIR& Graph)
+    {
+        for (const auto& Control : Graph.Inputs)
+        {
+            const auto* Input = Builder.FindGraphInput(Control.Name);
+            if (!Input) continue; // A user can remove a generated input from the graph.
+            const float TransportDefault = Control.MetaSoundDefault();
+            if (Control.bHasAuditionExpression)
+            {
+                const FString Auto = TransportDefault == 0.f ? TEXT("-0") : FString::SanitizeFloat(TransportDefault, 0);
+                Builder.SetGraphInputDisplayName(Control.Name, FText::FromString(
+                    FString::Printf(TEXT("%s (Auto: %s)"), *Control.Name.ToString(), *Auto)));
+                Builder.SetGraphInputDescription(Control.Name, FText::FromString(FString::Printf(
+                    TEXT("Auto (%s) follows the authored audition. Manual range: %g to %g. DSL default: %g."),
+                    *Auto, Control.Minimum, Control.Maximum, Control.Default)));
+            }
+
+            // Keep custom page defaults. Only migrate the former unassigned float.
+            const auto Defaults = Input->GetDefaults();
+            for (const auto& Page : Defaults)
+            {
+                float Value;
+                if (!Page.Literal.TryGet(Value) || Value != UnsetProgramControl) continue;
+                const FMetasoundFrontendLiteral Literal(TransportDefault);
+                Builder.SetGraphInputDefault(Control.Name, Literal, &Page.PageID);
+            }
+            // UE serializes the dial range separately from the graph literal. Repair a range
+            // expanded to fit the old sentinel without discarding the user's widget settings.
+            if (UObject* Metadata = Builder.FindMemberMetadata(Input->NodeID))
+            {
+                const FStructProperty* Property = FindFProperty<FStructProperty>(Metadata->GetClass(), TEXT("Range"));
+                if (Property && Property->Struct == TBaseStructure<FVector2D>::Get())
+                {
+                    auto& Range = *Property->ContainerPtrToValuePtr<FVector2D>(Metadata);
+                    if (Range.X <= UnsetProgramControl)
+                        Range = FVector2D(FMath::Min(Control.Minimum, double(TransportDefault)), Control.Maximum);
+                }
+            }
+        }
+
+        const auto& Pages = Builder.GetConstDocumentChecked().RootGraph.GetConstGraphPages();
+        for (const auto& Page : Pages)
+        {
+            for (const auto& Node : Page.Nodes)
+            {
+                const auto* Class = Builder.FindDependency(Node.ClassID);
+                if (Class && Class->Metadata.GetClassName() == FMetasoundFrontendClassName(TEXT("DreamSFX"), TEXT("GraphPlayer")))
+                    Builder.SetNodeUnconnectedPinsHidden(Node.GetID(), true, &Page.PageID);
+            }
+        }
+    }
+
+    static void InitEditorLayout(FMetaSoundFrontendDocumentBuilder& Builder)
+    {
+        // UE copies input positions onto the visible input templates when it inserts them.
+        Builder.InitNodeLocations();
+        Metasound::Frontend::FInputNodeTemplate::GetChecked().Inject(Builder, true);
+    }
+
+    static bool UpgradePlayerDependency(FMetaSoundFrontendDocumentBuilder& Builder)
+    {
+        using namespace Metasound::Frontend;
+        const FMetasoundFrontendClassName Name(TEXT("DreamSFX"), TEXT("GraphPlayer"));
+        const FNodeClassRegistryKey Current(EMetasoundFrontendClassType::External, Name, 1, 2);
+        // Persist the new pin defaults on disk as well as in the editor's registry.
+        // ReplaceDependency restores node IDs, style, connections and instance literals.
+        for (int32 Minor = 0; Minor < Current.Version.Minor; ++Minor)
+        {
+            const FNodeClassRegistryKey Old(EMetasoundFrontendClassType::External, Name, 1, Minor);
+            if (Builder.FindDependency(Old) && !Builder.ReplaceDependency(Old, Current)) return false;
+        }
+        return true;
+    }
 
     static UMetaSoundSource* BuildGraphSource(FGraphPtr Graph, UPackage* Package, FName Name, FString& Error, UMetaSoundSource* Existing = nullptr)
     {
@@ -62,7 +142,7 @@ namespace DreamSFX::V2
             if(!Expose(TEXT("State"),TEXT("State"),Type,State))return Fail(TEXT("Cannot expose the live state input"));
             for(int32 I=0;I<Graph->Inputs.Num();++I)
             {
-                const auto Value=Subsystem->CreateFloatMetaSoundLiteral(UnsetProgramControl,Type);
+                const auto Value=Subsystem->CreateFloatMetaSoundLiteral(Graph->Inputs[I].MetaSoundDefault(),Type);
                 if(!Expose(Graph->Inputs[I].Name,ProgramControlPin(I),Type,Value))return Fail(TEXT("Cannot expose the named program input"));
             }
         }
@@ -80,7 +160,7 @@ namespace DreamSFX::V2
         const auto Input = Builder->FindNodeInputByName(Player, TEXT("Graph"), Result);
         if (Result != EMetaSoundBuilderResult::Succeeded) return Fail(TEXT("GraphPlayer graph input unavailable"));
         auto* Data = Existing ? FindObject<UDreamSFXGraphAsset>(Source,TEXT("DreamSFXGraph")) : NewObject<UDreamSFXGraphAsset>(Source, TEXT("DreamSFXGraph"), bPersist ? RF_Public : RF_Transient);
-        if (!Data || !Data->Initialize(MoveTemp(Graph), bPersist, GeneratedSourceVersion))
+        if (!Data || !Data->Initialize(Graph, bPersist, GeneratedSourceVersion))
             return Fail(TEXT("Cannot encode compiled graph"));
         Builder->SetNodeInputDefault(Input, Subsystem->CreateObjectMetaSoundLiteral(Data), Result);
         if (Result != EMetaSoundBuilderResult::Succeeded) return Fail(TEXT("Cannot bind compiled graph"));
@@ -90,6 +170,11 @@ namespace DreamSFX::V2
         Interface.SetInterface(Cast<IMetaSoundDocumentInterface>(Source));
         FMetaSoundFrontendDocumentBuilder Target(Interface);
         Target.InitDocument(&Builder->GetConstBuilder().GetConstDocumentChecked(), nullptr, false);
+        if (bPersist)
+        {
+            InitEditorLayout(Target);
+            ConfigureControlDefaults(Target, *Graph);
+        }
         Source->ConformObjectToDocument();
         Source->RebuildReferencedAssetClasses();
         Target.FinishBuilding();
@@ -136,7 +221,24 @@ namespace DreamSFX::V2
                 return nullptr;
             }
             const FGraphPtr Previous = Data->GetGraph();
-            if (!BuildGraphSource(MoveTemp(Graph),Package,Name,Error,Source))
+            const int32 PreviousVersion = Data->GetSourceBuildVersion();
+            // Upgrade generated member defaults and layout in place, preserving edited wiring.
+            const bool bUpgradeDocument = !bForce && GeneratedSourceVersion == ControlDefaultsVersion &&
+                PreviousVersion < GeneratedSourceVersion && Data->MatchesBuild(*Graph, PreviousVersion);
+            if (bUpgradeDocument)
+            {
+                auto& Builder = Metasound::Engine::FDocumentBuilderRegistry::GetChecked().FindOrBeginBuilding(*Source);
+                if (!UpgradePlayerDependency(Builder.GetBuilder()))
+                {
+                    Error = TEXT("Cannot update the stored Graph Player pin definitions");
+                    return nullptr;
+                }
+                if (PreviousVersion < EditorLayoutVersion) InitEditorLayout(Builder.GetBuilder());
+                ConfigureControlDefaults(Builder.GetBuilder(), *Graph);
+                Source->RebuildReferencedAssetClasses();
+                Data->SetSourceBuildVersion(GeneratedSourceVersion);
+            }
+            else if (!BuildGraphSource(MoveTemp(Graph),Package,Name,Error,Source))
             {
                 Error = TEXT("Cannot encode compiled graph");
                 return nullptr;
@@ -145,7 +247,8 @@ namespace DreamSFX::V2
             Args.TopLevelFlags = RF_Public | RF_Standalone;
             if (!UPackage::SavePackage(Package, Source, *Filename, Args))
             {
-                BuildGraphSource(Previous,Package,Name,Error,Source);
+                if (bUpgradeDocument) Data->SetSourceBuildVersion(PreviousVersion);
+                else BuildGraphSource(Previous,Package,Name,Error,Source);
                 Package->SetDirtyFlag(true);
                 Error = TEXT("Cannot update the MetaSound package");
                 return nullptr;
